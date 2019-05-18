@@ -13,19 +13,18 @@
 #include <cxxabi.h>
 #include <errno.h>
 #include <execinfo.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <zconf.h>
-#include <stdio.h> 
-#include <linux/limits.h>
 #endif
 
-#include <map>
-#include <list>
 #include <array>
-#include <iostream>
 #include <fstream>
+#include <iostream>
+#include <list>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -63,9 +62,12 @@ static const unsigned int kMaxStack = 64;
 static const unsigned int kStackStart = 0;
 class StackTraceEntry {
  public:
-  StackTraceEntry(std::size_t index, const std::string& _fileName, const std::string& demang,
-                  const std::string& addr)
-    : m_index(index), fileName(_fileName), m_demangled(demang), m_addr(addr) {}
+  StackTraceEntry(std::size_t index, const std::string& _fileName,
+                  const std::string& demang, const std::string& addr)
+      : m_index(index),
+        fileName(_fileName),
+        m_demangled(demang),
+        m_addr(addr) {}
 
   std::size_t m_index;
   std::string fileName;
@@ -78,14 +80,13 @@ class StackTraceEntry {
 };
 
 inline std::ostream& operator<<(std::ostream& ss, const StackTraceEntry& si) {
-  ss << "[" << si.m_index << "] "
-     << si.m_addr << " "
+  ss << "[" << si.m_index << "] " << si.m_addr << " "
      << (si.m_demangled.empty() ? "" : "") << si.m_demangled;
   return ss;
 }
 
 std::string getexepath() {
-  char result[PATH_MAX];
+  char result[65536];
   ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
   return std::string(result, (count > 0) ? count : 0);
 }
@@ -106,14 +107,14 @@ class StackTrace {
       entries[a].m_demangled = atosLines[a];
     }
 #else
-    std::map<std::string,std::list<std::string>> fileAddresses;
-    std::map<std::string,std::list<std::string>> fileData;
+    std::map<std::string, std::list<std::string> > fileAddresses;
+    std::map<std::string, std::list<std::string> > fileData;
     for (const auto& it : entries) {
       if (it.fileName.length()) {
-	if (fileAddresses.find(it.fileName) == fileAddresses.end()) {
-	  fileAddresses[it.fileName] = {};
-	}
-	fileAddresses.at(it.fileName).push_back(it.m_addr);
+        if (fileAddresses.find(it.fileName) == fileAddresses.end()) {
+          fileAddresses[it.fileName] = {};
+        }
+        fileAddresses.at(it.fileName).push_back(it.m_addr);
       }
     }
     for (const auto& it : fileAddresses) {
@@ -121,16 +122,17 @@ class StackTrace {
       std::ostringstream ss;
       ss << "addr2line -C -f -p -e " << fileName << " ";
       for (const auto& it2 : it.second) {
-	ss << it2 << " ";
+        ss << it2 << " ";
       }
       auto outputLines = split(SystemToStr(ss.str().c_str()), '\n');
-      fileData[fileName] = std::list<std::string>(outputLines.begin(), outputLines.end());
+      fileData[fileName] =
+          std::list<std::string>(outputLines.begin(), outputLines.end());
     }
     for (auto& it : entries) {
       if (it.fileName.length()) {
-	std::string outputLine = fileData.at(it.fileName).front();
-	fileData.at(it.fileName).pop_front();
-	it.m_demangled = outputLine;
+        std::string outputLine = fileData.at(it.fileName).front();
+        fileData.at(it.fileName).pop_front();
+        it.m_demangled = outputLine;
       }
     }
 #endif
@@ -158,7 +160,8 @@ StackTrace generate() {
 #else
   std::map<std::string, uint64_t> baseAddresses;
   std::string line;
-  std::string procMapFileName = std::string("/proc/") + std::to_string(getpid()) + std::string("/maps");
+  std::string procMapFileName =
+      std::string("/proc/") + std::to_string(getpid()) + std::string("/maps");
   std::ifstream infile(procMapFileName.c_str());
   while (std::getline(infile, line)) {
     std::istringstream iss(line);
@@ -170,9 +173,12 @@ StackTrace generate() {
     std::string path;
     std::cout << "PROC LINE: " << line << std::endl;
 
-    if (!(iss >> addressRange >> perms >> offset >> device >> inode >> path)) { break; } // error
+    if (!(iss >> addressRange >> perms >> offset >> device >> inode >> path)) {
+      break;
+    }  // error
     uint64_t baseAddress = stoull(split(addressRange, '-')[0], NULL, 16);
-    if (baseAddresses.find(path) == baseAddresses.end() || baseAddresses[path] > baseAddress) {
+    if (baseAddresses.find(path) == baseAddresses.end() ||
+        baseAddresses[path] > baseAddress) {
       baseAddresses[path] = baseAddress;
     }
   }
@@ -190,7 +196,8 @@ StackTrace generate() {
       const std::string line(strings[i]);
       std::cout << "LINE: " << line << std::endl;
 #ifdef __APPLE__
-      //Example: ust-test                            0x000000010001e883 _ZNK5Catch21TestInvokerAsFunction6invokeEv + 19
+      // Example: ust-test                            0x000000010001e883
+      // _ZNK5Catch21TestInvokerAsFunction6invokeEv + 19
       auto p = line.find("0x");
       if (p != std::string::npos) {
         addr = line.substr(p);
@@ -200,27 +207,30 @@ StackTrace generate() {
         addr = addr.substr(0, spaceLoc);
       }
 #else
-      //Example: ./ust-test(_ZNK5Catch21TestInvokerAsFunction6invokeEv+0x16) [0x55f1278af96e]
+      // Example: ./ust-test(_ZNK5Catch21TestInvokerAsFunction6invokeEv+0x16)
+      // [0x55f1278af96e]
       auto parenStart = line.find("(");
       auto parenEnd = line.find(")");
-      fileName = line.substr(0,parenStart);
+      fileName = line.substr(0, parenStart);
       // Convert filename to canonical path
       char buf[PATH_MAX];
       ::realpath(fileName.c_str(), buf);
-      std::cout << "FILENAME MAPPED FROM " << fileName << " TO " << buf << std::endl;
+      std::cout << "FILENAME MAPPED FROM " << fileName << " TO " << buf
+                << std::endl;
       fileName = std::string(buf);
-      mangName = line.substr(parenStart+1, parenEnd - (parenStart+1));
+      mangName = line.substr(parenStart + 1, parenEnd - (parenStart + 1));
       // Strip off the offset from the name
       mangName = mangName.substr(0, mangName.find("+"));
       auto bracketStart = line.find("[");
       auto bracketEnd = line.find("]");
-      addr = line.substr(bracketStart+1, bracketEnd - (bracketStart+1));
+      addr = line.substr(bracketStart + 1, bracketEnd - (bracketStart + 1));
       if (baseAddresses.find(fileName) != baseAddresses.end()) {
-	auto addrHex = (std::stoull(addr, NULL, 16) - baseAddresses[fileName]);
-	std::ostringstream ss;
-	ss << "0x" << std::hex << addrHex;
-	std::cout << "ADDR MAPPED FROM " << addr << " -> " << ss.str() << std::endl;
-	addr = ss.str();
+        auto addrHex = (std::stoull(addr, NULL, 16) - baseAddresses[fileName]);
+        std::ostringstream ss;
+        ss << "0x" << std::hex << addrHex;
+        std::cout << "ADDR MAPPED FROM " << addr << " -> " << ss.str()
+                  << std::endl;
+        addr = ss.str();
       }
 #endif
       // Perform demangling if parsed properly
