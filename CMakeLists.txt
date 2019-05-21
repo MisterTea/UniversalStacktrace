@@ -21,6 +21,13 @@ include_directories(
   ust
   )
 
+IF(MINGW OR WIN32)
+SET(
+  CORE_LIBRARIES
+
+  ole32
+  Dbghelp
+)
 IF(MINGW)
 SET(
 BACKTRACE_FILES
@@ -41,7 +48,11 @@ external/libbacktrace_mingw/alloc.c
 include_directories(
   external/libbacktrace_mingw
   )
+ENDIF()
 ELSE()
+SET(
+  CORE_LIBRARIES
+)
 SET(BACKTRACE_FILES)
 ENDIF()
 
@@ -57,8 +68,7 @@ add_executable(
 target_link_libraries(
   ust-test
 
-  ole32
-  Dbghelp
+  ${CORE_LIBRARIES}
 )
 add_test(
   ust-test
