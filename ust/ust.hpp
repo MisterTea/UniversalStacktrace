@@ -1,14 +1,16 @@
 #pragma once
 
-#if !defined(__GNUC__)
-#error This is only designed for GNU-basbed compilers (gcc, clang, etc.).
-#endif
-
 #if (defined(__MINGW32__) || defined(__MINGW64__))
 #define __MINGW__
+#undef _MSC_VER
 #endif
 
+#ifdef _MSC_VER
+#include <DbgHelp.h>
+#include <windows.h>
+#else
 #ifdef __MINGW__
+#include "backtrace.h"
 #else
 #include <cxxabi.h>
 #include <errno.h>
@@ -18,6 +20,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <zconf.h>
+#endif
 #endif
 
 #include <array>
@@ -46,6 +49,7 @@ inline std::vector<std::string> split(const std::string& s, char delim) {
   return elems;
 }
 
+#ifndef _MSC_VER
 inline std::string SystemToStr(const char* cmd) {
   std::array<char, 128> buffer;
   std::string result;
@@ -57,6 +61,20 @@ inline std::string SystemToStr(const char* cmd) {
   }
   return result;
 }
+#endif
+
+#ifdef __MINGW__
+int bt_callback(void* data, uintptr_t pc, const char* filename, int lineno,
+                const char* function);
+
+inline void libbacktrace_error_callback(void* data, const char* msg, int errnum) {
+  if (msg) {
+    std::cout << "GOT ERROR: " << std::string(msg) << " " << errnum << std::endl;
+  } else {
+    std::cout << "GOT ERROR: " << errnum << std::endl;
+  }
+}
+#endif
 
 static const unsigned int kMaxStack = 64;
 static const unsigned int kStackStart = 0;
@@ -85,17 +103,95 @@ inline std::ostream& operator<<(std::ostream& ss, const StackTraceEntry& si) {
   return ss;
 }
 
-std::string getexepath() {
-  char result[65536];
-  ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-  return std::string(result, (count > 0) ? count : 0);
-}
-
 class StackTrace {
  public:
   StackTrace(const std::vector<StackTraceEntry>& _entries) : entries(_entries) {
-#ifdef __MINGW__
-#else
+#ifdef _MSC_VER
+    HANDLE process = GetCurrentProcess();
+    HANDLE thread = GetCurrentThread();
+
+    CONTEXT context;
+    memset(&context, 0, sizeof(CONTEXT));
+    context.ContextFlags = CONTEXT_FULL;
+    RtlCaptureContext(&context);
+
+    SymSetOptions(SYMOPT_LOAD_LINES);
+    SymInitialize(process, NULL, TRUE);
+
+    DWORD image;
+    STACKFRAME64 stackframe;
+    ZeroMemory(&stackframe, sizeof(STACKFRAME64));
+
+#ifdef _M_IX86
+    image = IMAGE_FILE_MACHINE_I386;
+    stackframe.AddrPC.Offset = context.Eip;
+    stackframe.AddrPC.Mode = AddrModeFlat;
+    stackframe.AddrFrame.Offset = context.Ebp;
+    stackframe.AddrFrame.Mode = AddrModeFlat;
+    stackframe.AddrStack.Offset = context.Esp;
+    stackframe.AddrStack.Mode = AddrModeFlat;
+#elif _M_X64
+    image = IMAGE_FILE_MACHINE_AMD64;
+    stackframe.AddrPC.Offset = context.Rip;
+    stackframe.AddrPC.Mode = AddrModeFlat;
+    stackframe.AddrFrame.Offset = context.Rsp;
+    stackframe.AddrFrame.Mode = AddrModeFlat;
+    stackframe.AddrStack.Offset = context.Rsp;
+    stackframe.AddrStack.Mode = AddrModeFlat;
+#elif _M_IA64
+    image = IMAGE_FILE_MACHINE_IA64;
+    stackframe.AddrPC.Offset = context.StIIP;
+    stackframe.AddrPC.Mode = AddrModeFlat;
+    stackframe.AddrFrame.Offset = context.IntSp;
+    stackframe.AddrFrame.Mode = AddrModeFlat;
+    stackframe.AddrBStore.Offset = context.RsBSP;
+    stackframe.AddrBStore.Mode = AddrModeFlat;
+    stackframe.AddrStack.Offset = context.IntSp;
+    stackframe.AddrStack.Mode = AddrModeFlat;
+#endif
+
+    for (size_t i = 0; i < 25; i++) {
+      BOOL result =
+          StackWalk64(image, process, thread, &stackframe, &context, NULL,
+                      SymFunctionTableAccess64, SymGetModuleBase64, NULL);
+
+      if (!result) {
+        break;
+      }
+
+      if (stackframe.AddrPC.Offset == stackframe.AddrReturn.Offset) break;
+
+      const int cnBufferSize = 4096;
+      unsigned char byBuffer[sizeof(IMAGEHLP_SYMBOL64) + cnBufferSize];
+      IMAGEHLP_SYMBOL64* pSymbol = (IMAGEHLP_SYMBOL64*)byBuffer;
+      memset(pSymbol, 0, sizeof(IMAGEHLP_SYMBOL64) + cnBufferSize);
+      pSymbol->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
+      pSymbol->MaxNameLength = cnBufferSize;
+
+      DWORD64 displacement = 0;
+      if (SymGetSymFromAddr64(process, stackframe.AddrPC.Offset, &displacement,
+                              pSymbol)) {
+        printf("[%lld] %s\n", i, pSymbol->Name);
+      } else {
+        printf("[%lld] ???\n", i);
+      }
+
+      DWORD displacement32 = 0;
+      IMAGEHLP_LINE64 theLine;
+      memset(&theLine, 0, sizeof(theLine));
+      theLine.SizeOfStruct = sizeof(theLine);
+      if (SymGetLineFromAddr64(process, stackframe.AddrPC.Offset,
+                               &displacement32, &theLine)) {
+        printf("%s:%ld\n", theLine.FileName, theLine.LineNumber);
+      } else {
+        printf("???\n");
+      }
+    }
+
+    SymCleanup(process);
+    return;
+#endif
+
 #ifdef __APPLE__
     std::ostringstream ss;
     ss << "atos -p " << std::to_string(getpid()) << " ";
@@ -106,7 +202,13 @@ class StackTrace {
     for (int a = 0; a < int(entries.size()); a++) {
       entries[a].m_demangled = atosLines[a];
     }
-#else
+    return;
+#endif
+
+#ifdef __MINGW__
+    return;
+#endif
+
     std::map<std::string, std::list<std::string> > fileAddresses;
     std::map<std::string, std::list<std::string> > fileData;
     for (const auto& it : entries) {
@@ -135,8 +237,6 @@ class StackTrace {
         it.m_demangled = outputLine;
       }
     }
-#endif
-#endif
   }
   friend std::ostream& operator<<(std::ostream& ss, const StackTrace& si);
 
@@ -153,8 +253,18 @@ inline std::ostream& operator<<(std::ostream& ss, const StackTrace& si) {
 
 StackTrace generate() {
   std::vector<StackTraceEntry> stackTrace;
+#ifdef _MSC_VER
+  return StackTrace(stackTrace);
+#endif
+
 #ifdef __MINGW__
-#else
+  static ::backtrace_state* state =
+      ::backtrace_create_state("E:\\GitHub\\UniversalStacktrace\\build\\ust-test.exe", 0, libbacktrace_error_callback, NULL);
+  ::backtrace_full(state, 0, bt_callback, libbacktrace_error_callback, (void*)&stackTrace);
+  return StackTrace(stackTrace);
+#endif
+
+#ifndef __MINGW__
 #ifdef __APPLE__
   // TODO: Handle relocatable code
 #else
@@ -261,4 +371,19 @@ StackTrace generate() {
 #endif
   return StackTrace(stackTrace);
 }
+
+#ifdef __MINGW__
+int bt_callback(void* data, uintptr_t pc, const char* fileName, int lineno,
+                const char* function) {
+                  std::cout << "GOT CALLBACK: " << pc << " " << (fileName?std::string(fileName):"NULL") << " " << lineno << " " << (function?std::string(function):"NULL") << std::endl;
+  std::vector<StackTraceEntry>* stackTrace =
+      (std::vector<StackTraceEntry>*)data;
+  StackTraceEntry entry(
+      pc, fileName?std::string(fileName):"NULL",
+      (function?std::string(function):"NULL") + std::string(":") + std::to_string(lineno),
+      std::to_string(pc));
+  stackTrace->push_back(entry);
+  return 0;
+}
+#endif
 }  // namespace ust
