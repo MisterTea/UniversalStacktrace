@@ -25,46 +25,20 @@ IF(MINGW OR WIN32)
 SET(
   CORE_LIBRARIES
 
-  ole32
-  Dbghelp
+  dbghelp
 )
-IF(MINGW)
-SET(
-BACKTRACE_FILES
-
-external/libbacktrace_mingw/atomic.c
-external/libbacktrace_mingw/dwarf.c
-external/libbacktrace_mingw/fileline.c
-external/libbacktrace_mingw/posix.c
-external/libbacktrace_mingw/print.c
-external/libbacktrace_mingw/sort.c
-external/libbacktrace_mingw/state.c
-external/libbacktrace_mingw/backtrace.c
-external/libbacktrace_mingw/simple.c
-external/libbacktrace_mingw/pecoff.c
-external/libbacktrace_mingw/read.c
-external/libbacktrace_mingw/alloc.c
-)
-include_directories(
-  external/libbacktrace_mingw
-  )
-ENDIF()
 ELSE()
 SET(
   CORE_LIBRARIES
 )
-SET(BACKTRACE_FILES)
 ENDIF()
 
 add_executable(
   ust-test
 
-  ${BACKTRACE_FILES}
-
   test/Main.cpp
-
   test/BasicTest.cpp
-  )
+)
 target_link_libraries(
   ust-test
 
@@ -73,4 +47,4 @@ target_link_libraries(
 add_test(
   ust-test
   ust-test
-  )
+)

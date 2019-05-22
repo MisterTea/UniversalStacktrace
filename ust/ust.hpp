@@ -1,16 +1,14 @@
 #pragma once
 
-#if (defined(__MINGW32__) || defined(__MINGW64__))
+#if defined(__MINGW32__) || defined(__MINGW64__)
 #define __MINGW__
 #undef _MSC_VER
 #endif
 
-#ifdef _MSC_VER
-#include <DbgHelp.h>
+#ifdef _WIN32
 #include <windows.h>
-#else
-#ifdef __MINGW__
-#include "backtrace.h"
+
+#include <DbgHelp.h>
 #else
 #include <cxxabi.h>
 #include <errno.h>
@@ -21,20 +19,20 @@
 #include <unistd.h>
 #include <zconf.h>
 #endif
-#endif
 
 #include <array>
 #include <fstream>
 #include <iostream>
 #include <list>
 #include <map>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <vector>
 
 namespace ust {
 template <typename Out>
-inline void split(const std::string& s, char delim, Out result) {
+inline void split(const std::string &s, char delim, Out result) {
   std::stringstream ss;
   ss.str(s);
   std::string item;
@@ -43,14 +41,15 @@ inline void split(const std::string& s, char delim, Out result) {
   }
 }
 
-inline std::vector<std::string> split(const std::string& s, char delim) {
+inline std::vector<std::string> split(const std::string &s, char delim) {
   std::vector<std::string> elems;
   split(s, delim, std::back_inserter(elems));
   return elems;
 }
 
 #ifndef _MSC_VER
-inline std::string SystemToStr(const char* cmd) {
+// Needed for calling addr2line / atos
+inline std::string SystemToStr(const char *cmd) {
   std::array<char, 128> buffer;
   std::string result;
   std::shared_ptr<FILE> pipe(popen(cmd, "r"), pclose);
@@ -63,49 +62,44 @@ inline std::string SystemToStr(const char* cmd) {
 }
 #endif
 
-#ifdef __MINGW__
-int bt_callback(void* data, uintptr_t pc, const char* filename, int lineno,
-                const char* function);
-
-inline void libbacktrace_error_callback(void* data, const char* msg, int errnum) {
-  if (msg) {
-    std::cout << "GOT ERROR: " << std::string(msg) << " " << errnum << std::endl;
-  } else {
-    std::cout << "GOT ERROR: " << errnum << std::endl;
-  }
-}
-#endif
-
 static const unsigned int kMaxStack = 64;
-static const unsigned int kStackStart = 0;
 class StackTraceEntry {
  public:
-  StackTraceEntry(std::size_t index, const std::string& _fileName,
-                  const std::string& demang, const std::string& addr)
-      : m_index(index),
-        fileName(_fileName),
-        m_demangled(demang),
-        m_addr(addr) {}
+  StackTraceEntry(int _stackIndex, const std::string &_address,
+                  const std::string &_functionName,
+                  const std::string &_sourceFileName, int _lineNumber)
+      : stackIndex(_stackIndex),
+        address(_address),
+        functionName(_functionName),
+        sourceFileName(_sourceFileName),
+        lineNumber(_lineNumber) {}
 
-  std::size_t m_index;
-  std::string fileName;
-  std::string m_demangled;
-  std::string m_addr;
-  friend std::ostream& operator<<(std::ostream& ss, const StackTraceEntry& si);
+  int stackIndex;
+  std::string address;
+  std::string functionName;
+  std::string sourceFileName;
+  int lineNumber;
+
+  friend std::ostream &operator<<(std::ostream &ss, const StackTraceEntry &si);
 
  private:
   StackTraceEntry(void);
 };
 
-inline std::ostream& operator<<(std::ostream& ss, const StackTraceEntry& si) {
-  ss << "[" << si.m_index << "] " << si.m_addr << " "
-     << (si.m_demangled.empty() ? "" : "") << si.m_demangled;
+inline std::ostream &operator<<(std::ostream &ss, const StackTraceEntry &si) {
+  ss << "[" << si.stackIndex << "] " << si.address;
+  if (!si.functionName.empty()) {
+    ss << " " << si.functionName;
+  }
+  if (si.lineNumber > 0) {
+    ss << " (" << si.sourceFileName << ":" << si.lineNumber << ")";
+  }
   return ss;
 }
 
 class StackTrace {
  public:
-  StackTrace(const std::vector<StackTraceEntry>& _entries) : entries(_entries) {
+  StackTrace(const std::vector<StackTraceEntry> &_entries) : entries(_entries) {
 #ifdef _MSC_VER
     HANDLE process = GetCurrentProcess();
     HANDLE thread = GetCurrentThread();
@@ -163,7 +157,7 @@ class StackTrace {
 
       const int cnBufferSize = 4096;
       unsigned char byBuffer[sizeof(IMAGEHLP_SYMBOL64) + cnBufferSize];
-      IMAGEHLP_SYMBOL64* pSymbol = (IMAGEHLP_SYMBOL64*)byBuffer;
+      IMAGEHLP_SYMBOL64 *pSymbol = (IMAGEHLP_SYMBOL64 *)byBuffer;
       memset(pSymbol, 0, sizeof(IMAGEHLP_SYMBOL64) + cnBufferSize);
       pSymbol->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
       pSymbol->MaxNameLength = cnBufferSize;
@@ -193,59 +187,17 @@ class StackTrace {
 #endif
 
 #ifdef __APPLE__
-    std::ostringstream ss;
-    ss << "atos -p " << std::to_string(getpid()) << " ";
-    for (const auto& it : entries) {
-      ss << it.m_addr << " ";
-    }
-    auto atosLines = split(SystemToStr(ss.str().c_str()), '\n');
-    for (int a = 0; a < int(entries.size()); a++) {
-      entries[a].m_demangled = atosLines[a];
-    }
     return;
 #endif
-
-#ifdef __MINGW__
-    return;
-#endif
-
-    std::map<std::string, std::list<std::string> > fileAddresses;
-    std::map<std::string, std::list<std::string> > fileData;
-    for (const auto& it : entries) {
-      if (it.fileName.length()) {
-        if (fileAddresses.find(it.fileName) == fileAddresses.end()) {
-          fileAddresses[it.fileName] = {};
-        }
-        fileAddresses.at(it.fileName).push_back(it.m_addr);
-      }
-    }
-    for (const auto& it : fileAddresses) {
-      std::string fileName = it.first;
-      std::ostringstream ss;
-      ss << "addr2line -C -f -p -e " << fileName << " ";
-      for (const auto& it2 : it.second) {
-        ss << it2 << " ";
-      }
-      auto outputLines = split(SystemToStr(ss.str().c_str()), '\n');
-      fileData[fileName] =
-          std::list<std::string>(outputLines.begin(), outputLines.end());
-    }
-    for (auto& it : entries) {
-      if (it.fileName.length()) {
-        std::string outputLine = fileData.at(it.fileName).front();
-        fileData.at(it.fileName).pop_front();
-        it.m_demangled = outputLine;
-      }
-    }
   }
-  friend std::ostream& operator<<(std::ostream& ss, const StackTrace& si);
+  friend std::ostream &operator<<(std::ostream &ss, const StackTrace &si);
 
  protected:
   std::vector<StackTraceEntry> entries;
 };
 
-inline std::ostream& operator<<(std::ostream& ss, const StackTrace& si) {
-  for (const auto& it : si.entries) {
+inline std::ostream &operator<<(std::ostream &ss, const StackTrace &si) {
+  for (const auto &it : si.entries) {
     ss << it << "\n";
   }
   return ss;
@@ -257,14 +209,6 @@ StackTrace generate() {
   return StackTrace(stackTrace);
 #endif
 
-#ifdef __MINGW__
-  static ::backtrace_state* state =
-      ::backtrace_create_state("E:\\GitHub\\UniversalStacktrace\\build\\ust-test.exe", 0, libbacktrace_error_callback, NULL);
-  ::backtrace_full(state, 0, bt_callback, libbacktrace_error_callback, (void*)&stackTrace);
-  return StackTrace(stackTrace);
-#endif
-
-#ifndef __MINGW__
 #ifdef __APPLE__
   // TODO: Handle relocatable code
 #else
@@ -281,7 +225,6 @@ StackTrace generate() {
     std::string device;
     std::string inode;
     std::string path;
-    std::cout << "PROC LINE: " << line << std::endl;
 
     if (!(iss >> addressRange >> perms >> offset >> device >> inode >> path)) {
       break;
@@ -293,97 +236,167 @@ StackTrace generate() {
     }
   }
 #endif
-  void* stack[kMaxStack];
-  unsigned int size = backtrace(stack, kMaxStack);
-  char** strings = backtrace_symbols(stack, size);
-  if (size > kStackStart) {  // Skip StackTrace c'tor and generateNew
-    for (std::size_t i = kStackStart; i < size; ++i) {
-      std::string fileName;
-      std::string mangName;
-      std::string hex;
-      std::string addr;
-
-      const std::string line(strings[i]);
-      std::cout << "LINE: " << line << std::endl;
-#ifdef __APPLE__
-      // Example: ust-test                            0x000000010001e883
-      // _ZNK5Catch21TestInvokerAsFunction6invokeEv + 19
-      auto p = line.find("0x");
-      if (p != std::string::npos) {
-        addr = line.substr(p);
-        auto spaceLoc = addr.find(" ");
-        mangName = addr.substr(spaceLoc + 1);
-        mangName = mangName.substr(0, mangName.find(" +"));
-        addr = addr.substr(0, spaceLoc);
-      }
-#else
-      // Example: ./ust-test(_ZNK5Catch21TestInvokerAsFunction6invokeEv+0x16)
-      // [0x55f1278af96e]
-      auto parenStart = line.find("(");
-      auto parenEnd = line.find(")");
-      fileName = line.substr(0, parenStart);
-      // Convert filename to canonical path
-      char buf[PATH_MAX];
-      ::realpath(fileName.c_str(), buf);
-      std::cout << "FILENAME MAPPED FROM " << fileName << " TO " << buf
-                << std::endl;
-      fileName = std::string(buf);
-      mangName = line.substr(parenStart + 1, parenEnd - (parenStart + 1));
-      // Strip off the offset from the name
-      mangName = mangName.substr(0, mangName.find("+"));
-      auto bracketStart = line.find("[");
-      auto bracketEnd = line.find("]");
-      addr = line.substr(bracketStart + 1, bracketEnd - (bracketStart + 1));
-      if (baseAddresses.find(fileName) != baseAddresses.end()) {
-        auto addrHex = (std::stoull(addr, NULL, 16) - baseAddresses[fileName]);
-        std::ostringstream ss;
-        ss << "0x" << std::hex << addrHex;
-        std::cout << "ADDR MAPPED FROM " << addr << " -> " << ss.str()
-                  << std::endl;
-        addr = ss.str();
-      }
-#endif
-      // Perform demangling if parsed properly
-      if (!mangName.empty()) {
-        int status = 0;
-        std::cout << "DEMANGLE" << mangName << std::endl;
-        char* demangName = abi::__cxa_demangle(mangName.data(), 0, 0, &status);
-        // if demangling is successful, output the demangled function name
-        if (status == 0) {
-          // Success (see
-          // http://gcc.gnu.org/onlinedocs/libstdc++/libstdc++-html-USERS-4.3/a01696.html)
-          StackTraceEntry entry(i - kStackStart, fileName, demangName, addr);
-          stackTrace.push_back(entry);
-        } else {
-          std::cout << "DEMANGLE FAILED" << std::endl;
-          // Not successful - we will use mangled name
-          StackTraceEntry entry(i - kStackStart, fileName, mangName, addr);
-          stackTrace.push_back(entry);
-        }
-        free(demangName);
-      } else {
-        StackTraceEntry entry(i - kStackStart, fileName, mangName, addr);
-        stackTrace.push_back(entry);
-      }
-    }
-  }
-  free(strings);
-#endif
-  return StackTrace(stackTrace);
-}
 
 #ifdef __MINGW__
-int bt_callback(void* data, uintptr_t pc, const char* fileName, int lineno,
-                const char* function) {
-                  std::cout << "GOT CALLBACK: " << pc << " " << (fileName?std::string(fileName):"NULL") << " " << lineno << " " << (function?std::string(function):"NULL") << std::endl;
-  std::vector<StackTraceEntry>* stackTrace =
-      (std::vector<StackTraceEntry>*)data;
-  StackTraceEntry entry(
-      pc, fileName?std::string(fileName):"NULL",
-      (function?std::string(function):"NULL") + std::string(":") + std::to_string(lineno),
-      std::to_string(pc));
-  stackTrace->push_back(entry);
-  return 0;
-}
+#define BACKTRACE_MAX_FRAME_NUMBER 128
+  void *stack[BACKTRACE_MAX_FRAME_NUMBER];
+  unsigned short frames;
+
+  frames = CaptureStackBackTrace(0, BACKTRACE_MAX_FRAME_NUMBER, stack, NULL);
+
+  // For mingw, assume the filename is the executable
+  std::string fileName(4096, '\0');
+  auto fileNameSize = GetModuleFileNameA(0, &fileName[0], fileName.size());
+  if (fileNameSize == 0 || fileNameSize == (ssize_t)fileName.size()) {
+    /* Error, possibly not enough space. */
+    fileName = "";
+  } else {
+    fileName = fileName.substr(0, fileNameSize);
+  }
+
+  for (unsigned short i = 0; i < frames; i++) {
+    std::string addr;
+    std::ostringstream ss;
+    ss << "0x" << std::hex << uint64_t(stack[i]);
+    addr = ss.str();
+    StackTraceEntry entry(i, fileName, "", addr);
+    stackTrace.push_back(entry);
+  }
+  return StackTrace(stackTrace);
+
 #endif
+
+  void *stack[kMaxStack];
+  unsigned int size = backtrace(stack, kMaxStack);
+
+  std::string addresses[kMaxStack];
+  std::string sourceFiles[kMaxStack];
+  int lineNumbers[kMaxStack];
+  for (int a = 0; a < kMaxStack; a++) {
+    lineNumbers[a] = -1;
+  }
+
+#ifdef __APPLE__
+  for (int a = 0; a < size; a++) {
+    std::ostringstream ss;
+    ss << "0x" << std::hex << uint64_t(stack[a]);
+    addresses[a] = ss.str();
+  }
+  std::ostringstream ss;
+  ss << "atos -p " << std::to_string(getpid()) << " ";
+  for (int a = 0; a < size; a++) {
+    ss << "0x" << std::hex << uint64_t(stack[a]) << " ";
+  }
+  auto atosLines = split(SystemToStr(ss.str().c_str()), '\n');
+  std::regex fileLineRegex("\\(([^\\(]+):([0-9]+)\\)$");
+  for (int a = 0; a < size; a++) {
+    std::cout << "ATOS LINE: " << atosLines[a] << std::endl;
+    // Find the filename and line number
+    std::smatch matches;
+    if (regex_search(atosLines[a], matches, fileLineRegex)) {
+      std::cout << "MATCHES: " << matches[1] << std::endl;
+      sourceFiles[a] = matches[1];
+      std::cout << "MATCHES: " << matches[2] << std::endl;
+      lineNumbers[a] = std::stoi(matches[2]);
+      std::cout << "MATCHES: " << matches.size() << std::endl;
+    }
+  }
+#elif defined(_WIN32)
+#else
+  // Unix
+  std::map<std::string, std::list<std::string> > fileAddresses;
+  std::map<std::string, std::list<std::string> > fileData;
+  for (const auto &it : entries) {
+    if (it.fileName.length()) {
+      if (fileAddresses.find(it.fileName) == fileAddresses.end()) {
+        fileAddresses[it.fileName] = {};
+      }
+      fileAddresses.at(it.fileName).push_back(it.address);
+    }
+  }
+  for (const auto &it : fileAddresses) {
+    std::string fileName = it.first;
+    std::ostringstream ss;
+    ss << "addr2line -C -f -p -e " << fileName << " ";
+    for (const auto &it2 : it.second) {
+      ss << it2 << " ";
+    }
+    auto outputLines = split(SystemToStr(ss.str().c_str()), '\n');
+    fileData[fileName] =
+        std::list<std::string>(outputLines.begin(), outputLines.end());
+  }
+  for (auto &it : entries) {
+    if (it.fileName.length()) {
+      std::string outputLine = fileData.at(it.fileName).front();
+      fileData.at(it.fileName).pop_front();
+      it.functionName = outputLine;
+    }
+  }
+#endif
+
+  char **strings = backtrace_symbols(stack, size);
+  for (int i = 0; i < size; ++i) {
+    std::string addr;
+    std::string fileName;
+    std::string functionName;
+
+    const std::string line(strings[i]);
+    std::cout << "BACKTRACE SYMBOLS: " << strings[i] << std::endl;
+#ifdef __APPLE__
+    // Example: ust-test                            0x000000010001e883
+    // _ZNK5Catch21TestInvokerAsFunction6invokeEv + 19
+    auto p = line.find("0x");
+    if (p != std::string::npos) {
+      addr = line.substr(p);
+      auto spaceLoc = addr.find(" ");
+      functionName = addr.substr(spaceLoc + 1);
+      functionName = functionName.substr(0, functionName.find(" +"));
+      addr = addr.substr(0, spaceLoc);
+    }
+#else
+    // Example: ./ust-test(_ZNK5Catch21TestInvokerAsFunction6invokeEv+0x16)
+    // [0x55f1278af96e]
+    auto parenStart = line.find("(");
+    auto parenEnd = line.find(")");
+    fileName = line.substr(0, parenStart);
+    // Convert filename to canonical path
+    char buf[PATH_MAX];
+    ::realpath(fileName.c_str(), buf);
+    fileName = std::string(buf);
+    functionName = line.substr(parenStart + 1, parenEnd - (parenStart + 1));
+    // Strip off the offset from the name
+    functionName = functionName.substr(0, functionName.find("+"));
+    auto bracketStart = line.find("[");
+    auto bracketEnd = line.find("]");
+    addr = line.substr(bracketStart + 1, bracketEnd - (bracketStart + 1));
+    if (baseAddresses.find(fileName) != baseAddresses.end()) {
+      auto addrHex = (std::stoull(addr, NULL, 16) - baseAddresses[fileName]);
+      std::ostringstream ss;
+      ss << "0x" << std::hex << addrHex;
+      addr = ss.str();
+    }
+#endif
+    // Perform demangling if parsed properly
+    if (!functionName.empty()) {
+      int status = 0;
+      std::cout << "Mangled name: " << functionName << std::endl;
+      auto demangledFunctionName =
+          abi::__cxa_demangle(functionName.data(), 0, 0, &status);
+      // if demangling is successful, output the demangled function name
+      if (status == 0) {
+        std::cout << "success: " << functionName << " -> "
+                  << demangledFunctionName << std::endl;
+        // Success (see
+        // http://gcc.gnu.org/onlinedocs/libstdc++/libstdc++-html-USERS-4.3/a01696.html)
+        functionName = std::string(demangledFunctionName);
+      }
+      free(demangledFunctionName);
+    }
+    StackTraceEntry entry(i, addresses[i], functionName, sourceFiles[i],
+                          lineNumbers[i]);
+    stackTrace.push_back(entry);
+  }
+  free(strings);
+  return StackTrace(stackTrace);
+}  // namespace ust
 }  // namespace ust
