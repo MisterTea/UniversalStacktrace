@@ -372,12 +372,10 @@ StackTrace generate() {
   }
 #elif defined(_MSC_VER)
 #else
-  std::cout << "UNIX" << std::endl;
   // Unix
   std::map<std::string, std::list<std::string> > fileAddresses;
   std::map<std::string, std::list<std::string> > fileData;
   for (const auto &it : stackTrace) {
-    std::cout << it.binaryFileName << std::endl;
     if (it.binaryFileName.length()) {
       if (fileAddresses.find(it.binaryFileName) == fileAddresses.end()) {
         fileAddresses[it.binaryFileName] = {};
@@ -392,7 +390,6 @@ StackTrace generate() {
     for (const auto &it2 : it.second) {
       ss << it2 << " ";
     }
-    std::cout << "CALLING addr2line: " << ss.str() << std::endl;
     auto outputLines = split(SystemToStr(ss.str().c_str()), '\n');
     fileData[fileName] =
         std::list<std::string>(outputLines.begin(), outputLines.end());
@@ -406,10 +403,7 @@ StackTrace generate() {
         continue;
       }
       std::smatch matches;
-      std::cout << "Outputline for " << it.address << ": " << outputLine
-                << std::endl;
       if (regex_search(outputLine, matches, addrToLineRegex)) {
-        std::cout << "REGEX MATCH" << std::endl;
         it.functionName = matches[1];
         it.sourceFileName = matches[2];
         it.lineNumber = std::stoi(matches[3]);
