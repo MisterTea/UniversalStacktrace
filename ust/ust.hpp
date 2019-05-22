@@ -123,8 +123,8 @@ inline std::ostream &operator<<(std::ostream &ss, const StackTraceEntry &si) {
 
 class StackTrace {
  public:
-  StackTrace(const std::vector<StackTraceEntry> &_entries) : entries(_entries) {
-  }
+  StackTrace(const std::vector<StackTraceEntry> &_entries)
+      : entries(_entries) {}
   friend std::ostream &operator<<(std::ostream &ss, const StackTrace &si);
 
  protected:
@@ -202,7 +202,7 @@ StackTrace generate() {
     pSymbol->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
     pSymbol->MaxNameLength = cnBufferSize;
 
-	std::string binaryFileName;
+    std::string binaryFileName;
     std::string functionName;
     DWORD64 displacement = 0;
     if (SymGetSymFromAddr64(process, stackframe.AddrPC.Offset, &displacement,
@@ -222,7 +222,7 @@ StackTrace generate() {
       lineNumber = int(theLine.LineNumber);
     }
 
-	stackTrace.push_back(StackTraceEntry(
+    stackTrace.push_back(StackTraceEntry(
         i, addressToString(stackframe.AddrPC.Offset), binaryFileName,
         functionName, sourceFileName, lineNumber));
   }
@@ -275,7 +275,7 @@ StackTrace generate() {
     fileName = "";
   } else {
     fileName = fileName.substr(0, fileNameSize);
-    std::replace(fileName.begin(), fileName.end(), '\\', '/');      
+    std::replace(fileName.begin(), fileName.end(), '\\', '/');
   }
 
   for (unsigned short i = 0; i < frames; i++) {
@@ -302,7 +302,6 @@ StackTrace generate() {
     std::string functionName;
 
     const std::string line(strings[i]);
-    std::cout << "BACKTRACE SYMBOLS: " << strings[i] << std::endl;
 #ifdef __APPLE__
     // Example: ust-test                            0x000000010001e883
     // _ZNK5Catch21TestInvokerAsFunction6invokeEv + 19
@@ -339,13 +338,10 @@ StackTrace generate() {
     // Perform demangling if parsed properly
     if (!functionName.empty()) {
       int status = 0;
-      std::cout << "Mangled name: " << functionName << std::endl;
       auto demangledFunctionName =
           abi::__cxa_demangle(functionName.data(), 0, 0, &status);
       // if demangling is successful, output the demangled function name
       if (status == 0) {
-        std::cout << "success: " << functionName << " -> "
-                  << demangledFunctionName << std::endl;
         // Success (see
         // http://gcc.gnu.org/onlinedocs/libstdc++/libstdc++-html-USERS-4.3/a01696.html)
         functionName = std::string(demangledFunctionName);
@@ -367,15 +363,11 @@ StackTrace generate() {
   auto atosLines = split(SystemToStr(ss.str().c_str()), '\n');
   std::regex fileLineRegex("\\(([^\\(]+):([0-9]+)\\)$");
   for (int a = 0; a < size; a++) {
-    std::cout << "ATOS LINE: " << atosLines[a] << std::endl;
     // Find the filename and line number
     std::smatch matches;
     if (regex_search(atosLines[a], matches, fileLineRegex)) {
-      std::cout << "MATCHES: " << matches[1] << std::endl;
       stackTrace[a].sourceFileName = matches[1];
-      std::cout << "MATCHES: " << matches[2] << std::endl;
       stackTrace[a].lineNumber = std::stoi(matches[2]);
-      std::cout << "MATCHES: " << matches.size() << std::endl;
     }
   }
 #elif defined(_MSC_VER)
@@ -414,7 +406,8 @@ StackTrace generate() {
         continue;
       }
       std::smatch matches;
-      std::cout << "Outputline for " << it.address << ": " << outputLine << std::endl;
+      std::cout << "Outputline for " << it.address << ": " << outputLine
+                << std::endl;
       if (regex_search(outputLine, matches, addrToLineRegex)) {
         std::cout << "REGEX MATCH" << std::endl;
         it.functionName = matches[1];
