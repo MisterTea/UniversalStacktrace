@@ -62,20 +62,23 @@ inline std::string SystemToStr(const char *cmd) {
 }
 #endif
 
-static const unsigned int kMaxStack = 64;
+static const int kMaxStack = 64;
 class StackTraceEntry {
  public:
   StackTraceEntry(int _stackIndex, const std::string &_address,
+		  const std::string &_binaryFileName,
                   const std::string &_functionName,
                   const std::string &_sourceFileName, int _lineNumber)
       : stackIndex(_stackIndex),
         address(_address),
+	binaryFileName(_binaryFileName),
         functionName(_functionName),
         sourceFileName(_sourceFileName),
         lineNumber(_lineNumber) {}
 
   int stackIndex;
   std::string address;
+  std::string binaryFileName;
   std::string functionName;
   std::string sourceFileName;
   int lineNumber;
@@ -92,7 +95,7 @@ inline std::ostream &operator<<(std::ostream &ss, const StackTraceEntry &si) {
     ss << " " << si.functionName;
   }
   if (si.lineNumber > 0) {
-    ss << " (" << si.sourceFileName << ":" << si.lineNumber << ")";
+    ss << " (" << basename(si.sourceFileName.c_str()) << ":" << si.lineNumber << ")";
   }
   return ss;
 }
@@ -267,72 +270,15 @@ StackTrace generate() {
 #endif
 
   void *stack[kMaxStack];
-  unsigned int size = backtrace(stack, kMaxStack);
+  int size = backtrace(stack, kMaxStack);
 
   std::string addresses[kMaxStack];
-  std::string sourceFiles[kMaxStack];
-  int lineNumbers[kMaxStack];
-  for (int a = 0; a < kMaxStack; a++) {
-    lineNumbers[a] = -1;
-  }
 
-#ifdef __APPLE__
   for (int a = 0; a < size; a++) {
     std::ostringstream ss;
     ss << "0x" << std::hex << uint64_t(stack[a]);
     addresses[a] = ss.str();
   }
-  std::ostringstream ss;
-  ss << "atos -p " << std::to_string(getpid()) << " ";
-  for (int a = 0; a < size; a++) {
-    ss << "0x" << std::hex << uint64_t(stack[a]) << " ";
-  }
-  auto atosLines = split(SystemToStr(ss.str().c_str()), '\n');
-  std::regex fileLineRegex("\\(([^\\(]+):([0-9]+)\\)$");
-  for (int a = 0; a < size; a++) {
-    std::cout << "ATOS LINE: " << atosLines[a] << std::endl;
-    // Find the filename and line number
-    std::smatch matches;
-    if (regex_search(atosLines[a], matches, fileLineRegex)) {
-      std::cout << "MATCHES: " << matches[1] << std::endl;
-      sourceFiles[a] = matches[1];
-      std::cout << "MATCHES: " << matches[2] << std::endl;
-      lineNumbers[a] = std::stoi(matches[2]);
-      std::cout << "MATCHES: " << matches.size() << std::endl;
-    }
-  }
-#elif defined(_WIN32)
-#else
-  // Unix
-  std::map<std::string, std::list<std::string> > fileAddresses;
-  std::map<std::string, std::list<std::string> > fileData;
-  for (const auto &it : entries) {
-    if (it.fileName.length()) {
-      if (fileAddresses.find(it.fileName) == fileAddresses.end()) {
-        fileAddresses[it.fileName] = {};
-      }
-      fileAddresses.at(it.fileName).push_back(it.address);
-    }
-  }
-  for (const auto &it : fileAddresses) {
-    std::string fileName = it.first;
-    std::ostringstream ss;
-    ss << "addr2line -C -f -p -e " << fileName << " ";
-    for (const auto &it2 : it.second) {
-      ss << it2 << " ";
-    }
-    auto outputLines = split(SystemToStr(ss.str().c_str()), '\n');
-    fileData[fileName] =
-        std::list<std::string>(outputLines.begin(), outputLines.end());
-  }
-  for (auto &it : entries) {
-    if (it.fileName.length()) {
-      std::string outputLine = fileData.at(it.fileName).front();
-      fileData.at(it.fileName).pop_front();
-      it.functionName = outputLine;
-    }
-  }
-#endif
 
   char **strings = backtrace_symbols(stack, size);
   for (int i = 0; i < size; ++i) {
@@ -370,10 +316,11 @@ StackTrace generate() {
     auto bracketEnd = line.find("]");
     addr = line.substr(bracketStart + 1, bracketEnd - (bracketStart + 1));
     if (baseAddresses.find(fileName) != baseAddresses.end()) {
+      // Make address relative to process start
       auto addrHex = (std::stoull(addr, NULL, 16) - baseAddresses[fileName]);
       std::ostringstream ss;
       ss << "0x" << std::hex << addrHex;
-      addr = ss.str();
+      addresses[i] = ss.str();
     }
 #endif
     // Perform demangling if parsed properly
@@ -392,11 +339,77 @@ StackTrace generate() {
       }
       free(demangledFunctionName);
     }
-    StackTraceEntry entry(i, addresses[i], functionName, sourceFiles[i],
-                          lineNumbers[i]);
+    StackTraceEntry entry(i, addresses[i], fileName, functionName, "",
+                          -1);
     stackTrace.push_back(entry);
   }
   free(strings);
+
+#ifdef __APPLE__
+  std::ostringstream ss;
+  ss << "atos -p " << std::to_string(getpid()) << " ";
+  for (int a = 0; a < size; a++) {
+    ss << "0x" << std::hex << uint64_t(stack[a]) << " ";
+  }
+  auto atosLines = split(SystemToStr(ss.str().c_str()), '\n');
+  std::regex fileLineRegex("\\(([^\\(]+):([0-9]+)\\)$");
+  for (int a = 0; a < size; a++) {
+    std::cout << "ATOS LINE: " << atosLines[a] << std::endl;
+    // Find the filename and line number
+    std::smatch matches;
+    if (regex_search(atosLines[a], matches, fileLineRegex)) {
+      std::cout << "MATCHES: " << matches[1] << std::endl;
+      stackTrace[a].sourceFileName = matches[1];
+      std::cout << "MATCHES: " << matches[2] << std::endl;
+      stackTrace[a].lineNumber = std::stoi(matches[2]);
+      std::cout << "MATCHES: " << matches.size() << std::endl;
+    }
+  }
+#elif defined(_WIN32)
+#else
+  std::cout << "UNIX" << std::endl;
+  // Unix
+  std::map<std::string, std::list<std::string> > fileAddresses;
+  std::map<std::string, std::list<std::string> > fileData;
+  for (const auto &it : stackTrace) {
+    std::cout << it.binaryFileName << std::endl;
+    if (it.binaryFileName.length()) {
+      if (fileAddresses.find(it.binaryFileName) == fileAddresses.end()) {
+        fileAddresses[it.binaryFileName] = {};
+      }
+      fileAddresses.at(it.binaryFileName).push_back(it.address);
+    }
+  }
+  for (const auto &it : fileAddresses) {
+    std::string fileName = it.first;
+    std::ostringstream ss;
+    ss << "addr2line -C -f -p -e " << fileName << " ";
+    for (const auto &it2 : it.second) {
+      ss << it2 << " ";
+    }
+    std::cout << "CALLING addr2line: " << ss.str() << std::endl;
+    auto outputLines = split(SystemToStr(ss.str().c_str()), '\n');
+    fileData[fileName] =
+        std::list<std::string>(outputLines.begin(), outputLines.end());
+  }
+  std::regex addrToLineRegex("^(.+?) at ([^:]+):([0-9]+)$");
+  for (auto &it : stackTrace) {
+    if (it.binaryFileName.length()) {
+      std::string outputLine = fileData.at(it.binaryFileName).front();
+      fileData.at(it.binaryFileName).pop_front();
+      if (outputLine == std::string("?? ??:0")) {
+	continue;
+      }
+      std::smatch matches;
+      if (regex_search(outputLine, matches, addrToLineRegex)) {
+	it.functionName = matches[1];
+	it.sourceFileName = matches[2];
+	it.lineNumber = std::stoi(matches[3]);
+      }
+    }
+  }
+#endif
+
   return StackTrace(stackTrace);
 }  // namespace ust
 }  // namespace ust
