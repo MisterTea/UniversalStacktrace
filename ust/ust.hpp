@@ -352,7 +352,7 @@ StackTrace generate() {
       }
       free(demangledFunctionName);
     }
-    StackTraceEntry entry(a, addressToString(uint64_t(stack[a])), fileName,
+    StackTraceEntry entry(a, addr, fileName,
                           functionName, "", -1);
     stackTrace.push_back(entry);
   }
