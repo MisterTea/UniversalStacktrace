@@ -21,10 +21,17 @@ include_directories(
   ust
   )
 
-IF(MINGW OR WIN32)
+IF(MINGW)
 SET(
   CORE_LIBRARIES
 
+  dbghelp
+)
+ELSEIF(WIN32)
+SET(
+  CORE_LIBRARIES
+
+  Shlwapi
   dbghelp
 )
 ELSE()
