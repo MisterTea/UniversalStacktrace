@@ -13,6 +13,7 @@
 #include <cxxabi.h>
 #include <errno.h>
 #include <execinfo.h>
+#include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -66,12 +67,12 @@ static const int kMaxStack = 64;
 class StackTraceEntry {
  public:
   StackTraceEntry(int _stackIndex, const std::string &_address,
-		  const std::string &_binaryFileName,
+                  const std::string &_binaryFileName,
                   const std::string &_functionName,
                   const std::string &_sourceFileName, int _lineNumber)
       : stackIndex(_stackIndex),
         address(_address),
-	binaryFileName(_binaryFileName),
+        binaryFileName(_binaryFileName),
         functionName(_functionName),
         sourceFileName(_sourceFileName),
         lineNumber(_lineNumber) {}
@@ -95,7 +96,9 @@ inline std::ostream &operator<<(std::ostream &ss, const StackTraceEntry &si) {
     ss << " " << si.functionName;
   }
   if (si.lineNumber > 0) {
-    ss << " (" << basename(si.sourceFileName.c_str()) << ":" << si.lineNumber << ")";
+    std::string sourceFileNameCopy = si.sourceFileName;
+    ss << " (" << basename(&sourceFileNameCopy[0]) << ":" << si.lineNumber
+       << ")";
   }
   return ss;
 }
@@ -339,8 +342,7 @@ StackTrace generate() {
       }
       free(demangledFunctionName);
     }
-    StackTraceEntry entry(i, addresses[i], fileName, functionName, "",
-                          -1);
+    StackTraceEntry entry(i, addresses[i], fileName, functionName, "", -1);
     stackTrace.push_back(entry);
   }
   free(strings);
@@ -398,13 +400,13 @@ StackTrace generate() {
       std::string outputLine = fileData.at(it.binaryFileName).front();
       fileData.at(it.binaryFileName).pop_front();
       if (outputLine == std::string("?? ??:0")) {
-	continue;
+        continue;
       }
       std::smatch matches;
       if (regex_search(outputLine, matches, addrToLineRegex)) {
-	it.functionName = matches[1];
-	it.sourceFileName = matches[2];
-	it.lineNumber = std::stoi(matches[3]);
+        it.functionName = matches[1];
+        it.sourceFileName = matches[2];
+        it.lineNumber = std::stoi(matches[3]);
       }
     }
   }
