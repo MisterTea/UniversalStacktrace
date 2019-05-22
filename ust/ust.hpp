@@ -1,10 +1,5 @@
 #pragma once
 
-#if defined(__MINGW32__) || defined(__MINGW64__)
-#define __MINGW__
-#undef _MSC_VER
-#endif
-
 #ifdef _WIN32
 #include <windows.h>
 
@@ -69,10 +64,13 @@ inline std::string SystemToStr(const char *cmd) {
 #endif
 
 #ifdef _MSC_VER
-char *basename(char *path) {
+// Replacement for basename()
+char *ustBasename(char *path) {
   PathStripPathA(path);
   return path;
 }
+#else
+char *ustBasename(char *path) { return ::basename(path); }
 #endif
 
 inline std::string addressToString(uint64_t address) {
@@ -81,7 +79,7 @@ inline std::string addressToString(uint64_t address) {
   return ss.str();
 }
 
-static const int kMaxStack = 64;
+static const int MAX_STACK_FRAMES = 64;
 class StackTraceEntry {
  public:
   StackTraceEntry(int _stackIndex, const std::string &_address,
@@ -115,7 +113,7 @@ inline std::ostream &operator<<(std::ostream &ss, const StackTraceEntry &si) {
   }
   if (si.lineNumber > 0) {
     std::string sourceFileNameCopy = si.sourceFileName;
-    ss << " (" << basename(&sourceFileNameCopy[0]) << ":" << si.lineNumber
+    ss << " (" << ustBasename(&sourceFileNameCopy[0]) << ":" << si.lineNumber
        << ")";
   }
   return ss;
@@ -127,7 +125,6 @@ class StackTrace {
       : entries(_entries) {}
   friend std::ostream &operator<<(std::ostream &ss, const StackTrace &si);
 
- protected:
   std::vector<StackTraceEntry> entries;
 };
 
@@ -138,9 +135,10 @@ inline std::ostream &operator<<(std::ostream &ss, const StackTrace &si) {
   return ss;
 }
 
+#ifdef _MSC_VER
+// Visual studio uses StackWalker to get stack trace info
 StackTrace generate() {
   std::vector<StackTraceEntry> stackTrace;
-#ifdef _MSC_VER
   HANDLE process = GetCurrentProcess();
   HANDLE thread = GetCurrentThread();
 
@@ -184,62 +182,70 @@ StackTrace generate() {
   stackframe.AddrStack.Mode = AddrModeFlat;
 #endif
 
-  for (size_t i = 0; i < 25; i++) {
-    BOOL result =
-        StackWalk64(image, process, thread, &stackframe, &context, NULL,
-                    SymFunctionTableAccess64, SymGetModuleBase64, NULL);
+  // Skip the first frame
+  BOOL result = StackWalk64(image, process, thread, &stackframe, &context, NULL,
+                            SymFunctionTableAccess64, SymGetModuleBase64, NULL);
+  if (result) {
+    for (size_t i = 0; i < MAX_STACK_FRAMES; i++) {
+      BOOL result =
+          StackWalk64(image, process, thread, &stackframe, &context, NULL,
+                      SymFunctionTableAccess64, SymGetModuleBase64, NULL);
 
-    if (!result) {
-      break;
+      if (!result) {
+        break;
+      }
+
+      if (stackframe.AddrPC.Offset == stackframe.AddrReturn.Offset) break;
+
+      const int cnBufferSize = 4096;
+      unsigned char byBuffer[sizeof(IMAGEHLP_SYMBOL64) + cnBufferSize];
+      IMAGEHLP_SYMBOL64 *pSymbol = (IMAGEHLP_SYMBOL64 *)byBuffer;
+      memset(pSymbol, 0, sizeof(IMAGEHLP_SYMBOL64) + cnBufferSize);
+      pSymbol->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
+      pSymbol->MaxNameLength = cnBufferSize;
+
+      std::string binaryFileName;
+      std::string functionName;
+      DWORD64 displacement = 0;
+      if (SymGetSymFromAddr64(process, stackframe.AddrPC.Offset, &displacement,
+                              pSymbol)) {
+        functionName = std::string(pSymbol->Name);
+      }
+
+      DWORD displacement32 = 0;
+      IMAGEHLP_LINE64 theLine;
+      memset(&theLine, 0, sizeof(theLine));
+      theLine.SizeOfStruct = sizeof(theLine);
+      std::string sourceFileName;
+      int lineNumber = -1;
+      if (SymGetLineFromAddr64(process, stackframe.AddrPC.Offset,
+                               &displacement32, &theLine)) {
+        sourceFileName = std::string(theLine.FileName);
+        lineNumber = int(theLine.LineNumber);
+      }
+
+      stackTrace.push_back(StackTraceEntry(
+          i, addressToString(stackframe.AddrPC.Offset), binaryFileName,
+          functionName, sourceFileName, lineNumber));
     }
-
-    if (stackframe.AddrPC.Offset == stackframe.AddrReturn.Offset) break;
-
-    const int cnBufferSize = 4096;
-    unsigned char byBuffer[sizeof(IMAGEHLP_SYMBOL64) + cnBufferSize];
-    IMAGEHLP_SYMBOL64 *pSymbol = (IMAGEHLP_SYMBOL64 *)byBuffer;
-    memset(pSymbol, 0, sizeof(IMAGEHLP_SYMBOL64) + cnBufferSize);
-    pSymbol->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
-    pSymbol->MaxNameLength = cnBufferSize;
-
-    std::string binaryFileName;
-    std::string functionName;
-    DWORD64 displacement = 0;
-    if (SymGetSymFromAddr64(process, stackframe.AddrPC.Offset, &displacement,
-                            pSymbol)) {
-      functionName = std::string(pSymbol->Name);
-    }
-
-    DWORD displacement32 = 0;
-    IMAGEHLP_LINE64 theLine;
-    memset(&theLine, 0, sizeof(theLine));
-    theLine.SizeOfStruct = sizeof(theLine);
-    std::string sourceFileName;
-    int lineNumber = -1;
-    if (SymGetLineFromAddr64(process, stackframe.AddrPC.Offset, &displacement32,
-                             &theLine)) {
-      sourceFileName = std::string(theLine.FileName);
-      lineNumber = int(theLine.LineNumber);
-    }
-
-    stackTrace.push_back(StackTraceEntry(
-        i, addressToString(stackframe.AddrPC.Offset), binaryFileName,
-        functionName, sourceFileName, lineNumber));
   }
 
   SymCleanup(process);
 
   return StackTrace(stackTrace);
 #else
-
-#ifdef __APPLE__
-  // TODO: Handle relocatable code
-#else
+// Non-visual studio compilers use a mess of things:
+// Apple uses backtrace() + atos
+// Linux uses backtrace() + addr2line
+// MinGW uses CaptureStackBackTrace() + addr2line
+StackTrace generate() {
+  std::vector<StackTraceEntry> stackTrace;
   std::map<std::string, uint64_t> baseAddresses;
   std::string line;
   std::string procMapFileName =
       std::string("/proc/") + std::to_string(getpid()) + std::string("/maps");
   std::ifstream infile(procMapFileName.c_str());
+  // Some OSes don't have /proc/*/maps, so we won't have base addresses for them
   while (std::getline(infile, line)) {
     std::istringstream iss(line);
     std::string addressRange;
@@ -258,45 +264,37 @@ StackTrace generate() {
       baseAddresses[path] = baseAddress;
     }
   }
-#endif
 
-#ifdef __MINGW__
-#define BACKTRACE_MAX_FRAME_NUMBER 128
-  void *stack[BACKTRACE_MAX_FRAME_NUMBER];
-  unsigned short frames;
+  void *stack[MAX_STACK_FRAMES];
+  int numFrames;
+#if defined(__MINGW32__) || defined(__MINGW64__)
+  numFrames = CaptureStackBackTrace(1, MAX_STACK_FRAMES, stack, NULL);
 
-  frames = CaptureStackBackTrace(0, BACKTRACE_MAX_FRAME_NUMBER, stack, NULL);
-
-  // For mingw, assume the filename is the executable
-  std::string fileName(4096, '\0');
-  auto fileNameSize = GetModuleFileNameA(0, &fileName[0], fileName.size());
-  if (fileNameSize == 0 || fileNameSize == (ssize_t)fileName.size()) {
-    /* Error, possibly not enough space. */
-    fileName = "";
-  } else {
-    fileName = fileName.substr(0, fileNameSize);
-    std::replace(fileName.begin(), fileName.end(), '\\', '/');
-  }
-
-  for (unsigned short i = 0; i < frames; i++) {
+  for (unsigned short i = 0; i < numFrames; i++) {
+    HMODULE moduleHandle;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (const char*)stack[i],
+                       &moduleHandle);
+    std::string fileName(4096, '\0');
+    auto fileNameSize =
+        GetModuleFileNameA(moduleHandle, &fileName[0], fileName.size());
+    if (fileNameSize == 0 || fileNameSize == (ssize_t)fileName.size()) {
+      /* Error, possibly not enough space. */
+      fileName = "";
+    } else {
+      fileName = fileName.substr(0, fileNameSize);
+      std::replace(fileName.begin(), fileName.end(), '\\', '/');
+    }
     std::string addr = addressToString(uint64_t(stack[i]));
     StackTraceEntry entry(i, addr, fileName, "", "", -1);
     stackTrace.push_back(entry);
   }
-
 #else
+  numFrames = backtrace(stack, MAX_STACK_FRAMES);
+  memmove(stack, stack + 1, sizeof(void *) * (numFrames - 1));
+  numFrames--;
 
-  void *stack[kMaxStack];
-  int size = backtrace(stack, kMaxStack);
-
-  std::string addresses[kMaxStack];
-
-  for (int a = 0; a < size; a++) {
-    addresses[a] = addressToString(uint64_t(stack[a]));
-  }
-
-  char **strings = backtrace_symbols(stack, size);
-  for (int i = 0; i < size; ++i) {
+  char **strings = backtrace_symbols(stack, numFrames);
+  for (int i = 0; i < numFrames; ++i) {
     std::string addr;
     std::string fileName;
     std::string functionName;
@@ -326,13 +324,11 @@ StackTrace generate() {
     functionName = line.substr(parenStart + 1, parenEnd - (parenStart + 1));
     // Strip off the offset from the name
     functionName = functionName.substr(0, functionName.find("+"));
-    auto bracketStart = line.find("[");
-    auto bracketEnd = line.find("]");
-    addr = line.substr(bracketStart + 1, bracketEnd - (bracketStart + 1));
     if (baseAddresses.find(fileName) != baseAddresses.end()) {
       // Make address relative to process start
-      auto addrHex = (std::stoull(addr, NULL, 16) - baseAddresses[fileName]);
-      addresses[i] = addressToString(addrHex);
+      addr = addressToString(uint64_t(stack[a]) - baseAddresses[fileName]);
+    } else {
+      addr = addressToString(uint64_t(stack[a]));
     }
 #endif
     // Perform demangling if parsed properly
@@ -352,17 +348,18 @@ StackTrace generate() {
     stackTrace.push_back(entry);
   }
   free(strings);
-
 #endif
+
+// Fetch source file & line numbers
 #ifdef __APPLE__
   std::ostringstream ss;
   ss << "atos -p " << std::to_string(getpid()) << " ";
-  for (int a = 0; a < size; a++) {
+  for (int a = 0; a < numFrames; a++) {
     ss << "0x" << std::hex << uint64_t(stack[a]) << " ";
   }
   auto atosLines = split(SystemToStr(ss.str().c_str()), '\n');
   std::regex fileLineRegex("\\(([^\\(]+):([0-9]+)\\)$");
-  for (int a = 0; a < size; a++) {
+  for (int a = 0; a < numFrames; a++) {
     // Find the filename and line number
     std::smatch matches;
     if (regex_search(atosLines[a], matches, fileLineRegex)) {
@@ -370,9 +367,8 @@ StackTrace generate() {
       stackTrace[a].lineNumber = std::stoi(matches[2]);
     }
   }
-#elif defined(_MSC_VER)
 #else
-  // Unix
+  // Unix & MinGW
   std::map<std::string, std::list<std::string> > fileAddresses;
   std::map<std::string, std::list<std::string> > fileData;
   for (const auto &it : stackTrace) {
@@ -414,5 +410,5 @@ StackTrace generate() {
 
   return StackTrace(stackTrace);
 #endif
-}  // namespace ust
+}
 }  // namespace ust
