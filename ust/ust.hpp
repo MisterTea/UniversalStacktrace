@@ -69,8 +69,16 @@ char *ustBasename(char *path) {
   PathStripPathA(path);
   return path;
 }
+std::string ustBasenameString(std::string input) {
+  PathStripPathA(&input[0]);
+  return input;
+}
 #else
 char *ustBasename(char *path) { return ::basename(path); }
+std::string ustBasenameString(std::string input) {
+  input = std::string(::basename(&input[0]));
+  return input;
+}
 #endif
 
 inline std::string addressToString(uint64_t address) {
@@ -270,10 +278,10 @@ StackTrace generate() {
 #if defined(__MINGW32__) || defined(__MINGW64__)
   numFrames = CaptureStackBackTrace(1, MAX_STACK_FRAMES, stack, NULL);
 
-  for (unsigned short i = 0; i < numFrames; i++) {
+  for (unsigned short a = 0; a < numFrames; a++) {
     HMODULE moduleHandle;
-    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (const char*)stack[i],
-                       &moduleHandle);
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                       (const char *)stack[a], &moduleHandle);
     std::string fileName(4096, '\0');
     auto fileNameSize =
         GetModuleFileNameA(moduleHandle, &fileName[0], fileName.size());
@@ -284,8 +292,8 @@ StackTrace generate() {
       fileName = fileName.substr(0, fileNameSize);
       std::replace(fileName.begin(), fileName.end(), '\\', '/');
     }
-    std::string addr = addressToString(uint64_t(stack[i]));
-    StackTraceEntry entry(i, addr, fileName, "", "", -1);
+    std::string addr = addressToString(uint64_t(stack[a]));
+    StackTraceEntry entry(a, addr, fileName, "", "", -1);
     stackTrace.push_back(entry);
   }
 #else
@@ -294,12 +302,12 @@ StackTrace generate() {
   numFrames--;
 
   char **strings = backtrace_symbols(stack, numFrames);
-  for (int i = 0; i < numFrames; ++i) {
+  for (int a = 0; a < numFrames; ++a) {
     std::string addr;
     std::string fileName;
     std::string functionName;
 
-    const std::string line(strings[i]);
+    const std::string line(strings[a]);
 #ifdef __APPLE__
     // Example: ust-test                            0x000000010001e883
     // _ZNK5Catch21TestInvokerAsFunction6invokeEv + 19
@@ -344,7 +352,8 @@ StackTrace generate() {
       }
       free(demangledFunctionName);
     }
-    StackTraceEntry entry(i, addresses[i], fileName, functionName, "", -1);
+    StackTraceEntry entry(a, addressToString(uint64_t(stack[a])), fileName,
+                          functionName, "", -1);
     stackTrace.push_back(entry);
   }
   free(strings);

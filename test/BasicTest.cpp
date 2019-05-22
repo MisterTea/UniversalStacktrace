@@ -16,13 +16,16 @@ void f2() {
   auto traceEntries = ust::generate();
   std::cout << traceEntries << std::endl;
   std::string fileName = std::string(__FILE__);
-  fileName = std::string(ust::ustBasename(&fileName[0]));
-  REQUIRE(traceEntries.entries[0].sourceFileName == __FILE__);
-  checkBetween(traceEntries.entries[0].lineNumber, 16, 17);
-  REQUIRE(traceEntries.entries[1].sourceFileName == __FILE__);
-  REQUIRE(traceEntries.entries[1].lineNumber == 13);
-  REQUIRE(traceEntries.entries[2].sourceFileName == __FILE__);
-  REQUIRE(traceEntries.entries[2].lineNumber == 28);
+  fileName = ust::ustBasenameString(fileName);
+  REQUIRE(ust::ustBasenameString(traceEntries.entries[0].sourceFileName) ==
+          fileName);
+  checkBetween(traceEntries.entries[0].lineNumber, __LINE__ - 6, __LINE__ - 5);
+  REQUIRE(ust::ustBasenameString(traceEntries.entries[1].sourceFileName) ==
+          fileName);
+  REQUIRE(traceEntries.entries[1].lineNumber == __LINE__ - 12);
+  REQUIRE(ust::ustBasenameString(traceEntries.entries[2].sourceFileName) ==
+          fileName);
+  REQUIRE(traceEntries.entries[2].lineNumber == __LINE__ + 3);
 }
 
 TEST_CASE("ConnectionTest", "[ConnectionTest]") { f(); }
