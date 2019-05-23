@@ -62,17 +62,17 @@ inline std::string SystemToStr(const char *cmd) {
 
 #ifdef _MSC_VER
 // Replacement for basename()
-char *ustBasename(char *path) {
+inline char *ustBasename(char *path) {
   PathStripPathA(path);
   return path;
 }
-std::string ustBasenameString(std::string input) {
+inline std::string ustBasenameString(std::string input) {
   PathStripPathA(&input[0]);
   return input;
 }
 #else
-char *ustBasename(char *path) { return ::basename(path); }
-std::string ustBasenameString(std::string input) {
+inline char *ustBasename(char *path) { return ::basename(path); }
+inline std::string ustBasenameString(std::string input) {
   input = std::string(::basename(&input[0]));
   return input;
 }
@@ -142,7 +142,7 @@ inline std::ostream &operator<<(std::ostream &ss, const StackTrace &si) {
 
 #ifdef _MSC_VER
 // Visual studio uses StackWalker to get stack trace info
-StackTrace generate() {
+inline StackTrace generate() {
   std::vector<StackTraceEntry> stackTrace;
   HANDLE process = GetCurrentProcess();
   HANDLE thread = GetCurrentThread();
@@ -243,12 +243,11 @@ StackTrace generate() {
 // Apple uses backtrace() + atos
 // Linux uses backtrace() + addr2line
 // MinGW uses CaptureStackBackTrace() + addr2line
-StackTrace generate() {
+inline StackTrace generate() {
   std::vector<StackTraceEntry> stackTrace;
   std::map<std::string, uint64_t> baseAddresses;
   std::string line;
-  std::string procMapFileName =
-      std::string("/proc/self/maps");
+  std::string procMapFileName = std::string("/proc/self/maps");
   std::ifstream infile(procMapFileName.c_str());
   // Some OSes don't have /proc/*/maps, so we won't have base addresses for them
   while (std::getline(infile, line)) {
@@ -349,8 +348,7 @@ StackTrace generate() {
       }
       free(demangledFunctionName);
     }
-    StackTraceEntry entry(a, addr, fileName,
-                          functionName, "", -1);
+    StackTraceEntry entry(a, addr, fileName, functionName, "", -1);
     stackTrace.push_back(entry);
   }
   free(strings);
