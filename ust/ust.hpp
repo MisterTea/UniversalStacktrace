@@ -18,6 +18,10 @@
 #include <libgen.h>
 #endif
 
+#ifdef __APPLE__
+#include <unistd.h>
+#endif
+
 #include <array>
 #include <fstream>
 #include <iostream>
