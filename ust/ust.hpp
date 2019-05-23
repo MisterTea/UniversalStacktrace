@@ -9,9 +9,6 @@
 #include <errno.h>
 #include <execinfo.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
 #include <zconf.h>
 #endif
 
@@ -251,7 +248,7 @@ StackTrace generate() {
   std::map<std::string, uint64_t> baseAddresses;
   std::string line;
   std::string procMapFileName =
-      std::string("/proc/") + std::to_string(getpid()) + std::string("/maps");
+      std::string("/proc/self/maps");
   std::ifstream infile(procMapFileName.c_str());
   // Some OSes don't have /proc/*/maps, so we won't have base addresses for them
   while (std::getline(infile, line)) {
