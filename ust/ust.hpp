@@ -16,6 +16,7 @@
 #include <shlwapi.h>
 #else
 #include <libgen.h>
+#include <sys/wait.h>
 #endif
 
 #ifdef __APPLE__
@@ -54,11 +55,17 @@ inline std::vector<std::string> split(const std::string &s, char delim) {
 inline std::string SystemToStr(const char *cmd) {
   std::array<char, 128> buffer;
   std::string result;
-  std::shared_ptr<FILE> pipe(popen(cmd, "r"), pclose);
-  if (!pipe) throw std::runtime_error("popen() failed!");
-  while (!feof(pipe.get())) {
-    if (fgets(buffer.data(), 128, pipe.get()) != nullptr)
-      result += buffer.data();
+  FILE *pipe = popen(cmd, "r");
+  if (!pipe) {
+    throw std::runtime_error("popen() failed!");
+  }
+  while (!feof(pipe)) {
+    if (fgets(buffer.data(), 128, pipe) != nullptr) result += buffer.data();
+  }
+  auto closeValue = pclose(pipe);
+  auto exitCode = WEXITSTATUS(closeValue);
+  if (exitCode) {
+    return "";
   }
   return result;
 }
@@ -365,14 +372,17 @@ inline StackTrace generate() {
   for (int a = 0; a < numFrames; a++) {
     ss << "0x" << std::hex << uint64_t(stack[a]) << " ";
   }
-  auto atosLines = split(SystemToStr(ss.str().c_str()), '\n');
-  std::regex fileLineRegex("\\(([^\\(]+):([0-9]+)\\)$");
-  for (int a = 0; a < numFrames; a++) {
-    // Find the filename and line number
-    std::smatch matches;
-    if (regex_search(atosLines[a], matches, fileLineRegex)) {
-      stackTrace[a].sourceFileName = matches[1];
-      stackTrace[a].lineNumber = std::stoi(matches[2]);
+  auto atosOutput = SystemToStr(ss.str().c_str());
+  if (atosOutput.length()) {
+    auto atosLines = split(atosOutput, '\n');
+    std::regex fileLineRegex("\\(([^\\(]+):([0-9]+)\\)$");
+    for (int a = 0; a < numFrames; a++) {
+      // Find the filename and line number
+      std::smatch matches;
+      if (regex_search(atosLines[a], matches, fileLineRegex)) {
+        stackTrace[a].sourceFileName = matches[1];
+        stackTrace[a].lineNumber = std::stoi(matches[2]);
+      }
     }
   }
 #else
@@ -394,9 +404,12 @@ inline StackTrace generate() {
     for (const auto &it2 : it.second) {
       ss << it2 << " ";
     }
-    auto outputLines = split(SystemToStr(ss.str().c_str()), '\n');
-    fileData[fileName] =
-        std::list<std::string>(outputLines.begin(), outputLines.end());
+    auto addrLineOutput = SystemToStr(ss.str().c_str());
+    if (addtLineOutput.length()) {
+      auto outputLines = split(addrLineOutput, '\n');
+      fileData[fileName] =
+          std::list<std::string>(outputLines.begin(), outputLines.end());
+    }
   }
   std::regex addrToLineRegex("^(.+?) at (.+):([0-9]+)$");
   for (auto &it : stackTrace) {
