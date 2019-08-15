@@ -2,14 +2,12 @@
 
 #ifdef _WIN32
 #include <windows.h>
-
 #include <DbgHelp.h>
 #else
 #include <cxxabi.h>
 #include <errno.h>
 #include <execinfo.h>
 #include <stdio.h>
-#include <zconf.h>
 #endif
 
 #ifdef _MSC_VER
