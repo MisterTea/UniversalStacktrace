@@ -14,7 +14,11 @@
 #include <shlwapi.h>
 #else
 #include <libgen.h>
+#if defined(__MINGW32__) || defined(__MINGW64__)
+#define WEXITSTATUS(w)    (((w) >> 8) & 0xff)
+#else
 #include <sys/wait.h>
+#endif
 #endif
 
 #ifdef __APPLE__
@@ -403,7 +407,7 @@ inline StackTrace generate() {
       ss << it2 << " ";
     }
     auto addrLineOutput = SystemToStr(ss.str().c_str());
-    if (addtLineOutput.length()) {
+    if (addrLineOutput.length()) {
       auto outputLines = split(addrLineOutput, '\n');
       fileData[fileName] =
           std::list<std::string>(outputLines.begin(), outputLines.end());
