@@ -25,6 +25,10 @@
 #include <unistd.h>
 #endif
 
+#ifdef __linux__
+#include <linux/limits.h>
+#endif
+
 #include <array>
 #include <fstream>
 #include <iostream>
