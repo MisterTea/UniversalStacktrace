@@ -208,7 +208,7 @@ inline StackTrace generate() {
   BOOL result = StackWalk64(image, process, thread, &stackframe, &context, NULL,
                             SymFunctionTableAccess64, SymGetModuleBase64, NULL);
   if (result) {
-    for (size_t i = 0; i < MAX_STACK_FRAMES; i++) {
+    for (int i = 0; i < MAX_STACK_FRAMES; i++) {
       BOOL result =
           StackWalk64(image, process, thread, &stackframe, &context, NULL,
                       SymFunctionTableAccess64, SymGetModuleBase64, NULL);
