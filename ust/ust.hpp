@@ -419,7 +419,7 @@ inline StackTrace generate() {
   }
   std::regex addrToLineRegex("^(.+?) at (.+):([0-9]+)$");
   for (auto &it : stackTrace) {
-    if (it.binaryFileName.length()) {
+    if (it.binaryFileName.length() && fileData.find(it.binaryFileName) != fileData.end()) {
       std::string outputLine = fileData.at(it.binaryFileName).front();
       fileData.at(it.binaryFileName).pop_front();
       if (outputLine == std::string("?? ??:0")) {
