@@ -37,6 +37,8 @@ SET(
 ELSE()
 SET(
   CORE_LIBRARIES
+
+  unwind
 )
 ENDIF()
 

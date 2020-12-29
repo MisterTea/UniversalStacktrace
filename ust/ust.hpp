@@ -1,12 +1,23 @@
 #pragma once
 
 #ifdef _WIN32
-#include <windows.h>
 #include <DbgHelp.h>
+#include <windows.h>
 #else
 #include <cxxabi.h>
 #include <errno.h>
+
+#if __has_include(<libunwind.h>)
+#define USE_UNWIND (1)
+#define UNW_LOCAL_ONLY
+#include <libunwind.h>
+#elif __has_include(<execinfo.h>)
+#define USE_UNWIND (0)
 #include <execinfo.h>
+#else
+#error Please install libunwind
+#endif
+
 #include <stdio.h>
 #endif
 
@@ -15,7 +26,7 @@
 #else
 #include <libgen.h>
 #if defined(__MINGW32__) || defined(__MINGW64__)
-#define WEXITSTATUS(w)    (((w) >> 8) & 0xff)
+#define WEXITSTATUS(w) (((w) >> 8) & 0xff)
 #else
 #include <sys/wait.h>
 #endif
@@ -262,7 +273,7 @@ inline StackTrace generate() {
 // MinGW uses CaptureStackBackTrace() + addr2line
 inline StackTrace generate() {
   std::vector<StackTraceEntry> stackTrace;
-  std::map<std::string, uint64_t> baseAddresses;
+  std::map<std::string, std::pair<uint64_t, uint64_t> > addressMaps;
   std::string line;
   std::string procMapFileName = std::string("/proc/self/maps");
   std::ifstream infile(procMapFileName.c_str());
@@ -279,15 +290,22 @@ inline StackTrace generate() {
     if (!(iss >> addressRange >> perms >> offset >> device >> inode >> path)) {
       break;
     }  // error
-    uint64_t baseAddress = stoull(split(addressRange, '-')[0], NULL, 16);
-    if (baseAddresses.find(path) == baseAddresses.end() ||
-        baseAddresses[path] > baseAddress) {
-      baseAddresses[path] = baseAddress;
+    uint64_t startAddress = stoull(split(addressRange, '-')[0], NULL, 16);
+    uint64_t endAddress = stoull(split(addressRange, '-')[1], NULL, 16);
+    if (addressMaps.find(path) == addressMaps.end()) {
+      addressMaps[path] = std::make_pair(startAddress, endAddress);
+    } else {
+      if (addressMaps[path].second != startAddress) {
+        ::abort();
+      }
+      addressMaps[path].second = endAddress;
     }
   }
 
+#if !USE_UNWIND
   void *stack[MAX_STACK_FRAMES];
   int numFrames;
+#endif
 #if defined(__MINGW32__) || defined(__MINGW64__)
   numFrames = CaptureStackBackTrace(1, MAX_STACK_FRAMES, stack, NULL);
 
@@ -307,6 +325,45 @@ inline StackTrace generate() {
     }
     std::string addr = addressToString(uint64_t(stack[a]));
     StackTraceEntry entry(a, addr, fileName, "", "", -1);
+    stackTrace.push_back(entry);
+  }
+#elif USE_UNWIND
+  unw_context_t context;
+  unw_getcontext(&context);
+
+  unw_cursor_t cursor;
+  unw_init_local(&cursor, &context);
+
+  unw_word_t ip;
+
+  for (int a = 0; unw_step(&cursor) > 0; a++) {
+    unw_get_reg(&cursor, UNW_REG_IP, &ip);
+    static const size_t kMax = 256;
+    char mangled[kMax], demangled[kMax];
+    unw_word_t offset;
+    unw_get_proc_name(&cursor, mangled, kMax, &offset);
+
+    int ok;
+    size_t len = kMax;
+    abi::__cxa_demangle(mangled, demangled, &len, &ok);
+
+    std::string filename;
+    uint64_t absoluteAddress = uint64_t(ip);
+    uint64_t relativeAddress = 0;
+    for (auto &it : addressMaps) {
+      if (it.second.first <= absoluteAddress &&
+          it.second.second > absoluteAddress) {
+        filename = it.first;
+        relativeAddress = absoluteAddress - it.second.first;
+      }
+    }
+
+    StackTraceEntry entry(
+        a,
+        relativeAddress ? addressToString(relativeAddress)
+                        : addressToString(absoluteAddress),
+        filename, ok == 0 ? std::string(demangled) : std::string(mangled), "",
+        -1);
     stackTrace.push_back(entry);
   }
 #else
@@ -345,9 +402,9 @@ inline StackTrace generate() {
     functionName = line.substr(parenStart + 1, parenEnd - (parenStart + 1));
     // Strip off the offset from the name
     functionName = functionName.substr(0, functionName.find("+"));
-    if (baseAddresses.find(fileName) != baseAddresses.end()) {
+    if (addressMaps.find(fileName) != addressMaps.end()) {
       // Make address relative to process start
-      addr = addressToString(uint64_t(stack[a]) - baseAddresses[fileName]);
+      addr = addressToString(uint64_t(stack[a]) - addressMaps[fileName].first);
     } else {
       addr = addressToString(uint64_t(stack[a]));
     }
@@ -419,7 +476,8 @@ inline StackTrace generate() {
   }
   std::regex addrToLineRegex("^(.+?) at (.+):([0-9]+)$");
   for (auto &it : stackTrace) {
-    if (it.binaryFileName.length() && fileData.find(it.binaryFileName) != fileData.end()) {
+    if (it.binaryFileName.length() &&
+        fileData.find(it.binaryFileName) != fileData.end()) {
       std::string outputLine = fileData.at(it.binaryFileName).front();
       fileData.at(it.binaryFileName).pop_front();
       if (outputLine == std::string("?? ??:0")) {
