@@ -40,6 +40,8 @@ SET(
 ELSEIF(APPLE)
 SET(
   CORE_LIBRARIES
+
+  System
 )
 ELSE()
 SET(
