@@ -37,6 +37,10 @@ SET(
   Shlwapi
   dbghelp
 )
+ELSEIF(APPLE)
+SET(
+  CORE_LIBRARIES
+)
 ELSE()
 SET(
   CORE_LIBRARIES
@@ -60,3 +64,4 @@ add_test(
   ust-test
   ust-test
 )
+add_sanitizers(ust-test)

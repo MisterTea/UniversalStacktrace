@@ -295,10 +295,14 @@ inline StackTrace generate() {
     if (addressMaps.find(path) == addressMaps.end()) {
       addressMaps[path] = std::make_pair(startAddress, endAddress);
     } else {
-      if (addressMaps[path].second != startAddress) {
+      if (addressMaps[path].second == startAddress) {
+        addressMaps[path].second = endAddress;
+      } else if (addressMaps[path].first == endAddress) {
+        addressMaps[path].first = startAddress;
+      } else {
+        std::cerr << "Non-contiguous address maps";
         ::abort();
       }
-      addressMaps[path].second = endAddress;
     }
   }
 
@@ -495,5 +499,5 @@ inline StackTrace generate() {
 
   return StackTrace(stackTrace);
 #endif
-}
+}  // namespace ust
 }  // namespace ust
