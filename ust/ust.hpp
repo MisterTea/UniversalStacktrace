@@ -295,14 +295,8 @@ inline StackTrace generate() {
     if (addressMaps.find(path) == addressMaps.end()) {
       addressMaps[path] = std::make_pair(startAddress, endAddress);
     } else {
-      if (addressMaps[path].second == startAddress) {
-        addressMaps[path].second = endAddress;
-      } else if (addressMaps[path].first == endAddress) {
-        addressMaps[path].first = startAddress;
-      } else {
-        std::cerr << "Non-contiguous address maps";
-        ::abort();
-      }
+      addressMaps[path].first = std::min(addressMaps[path].first, startAddress);
+      addressMaps[path].second = std::max(addressMaps[path].second, endAddress);
     }
   }
 
