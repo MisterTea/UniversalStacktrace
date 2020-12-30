@@ -370,60 +370,65 @@ inline StackTrace generate() {
   numFrames--;
 
   char **strings = backtrace_symbols(stack, numFrames);
-  for (int a = 0; a < numFrames; ++a) {
-    std::string addr;
-    std::string fileName;
-    std::string functionName;
+  if (strings) {
+    for (int a = 0; a < numFrames; ++a) {
+      std::string addr;
+      std::string fileName;
+      std::string functionName;
 
-    const std::string line(strings[a]);
+      const std::string line(strings[a]);
 #ifdef __APPLE__
-    // Example: ust-test                            0x000000010001e883
-    // _ZNK5Catch21TestInvokerAsFunction6invokeEv + 19
-    auto p = line.find("0x");
-    if (p != std::string::npos) {
-      addr = line.substr(p);
-      auto spaceLoc = addr.find(" ");
-      functionName = addr.substr(spaceLoc + 1);
-      functionName = functionName.substr(0, functionName.find(" +"));
-      addr = addr.substr(0, spaceLoc);
-    }
-#else
-    // Example: ./ust-test(_ZNK5Catch21TestInvokerAsFunction6invokeEv+0x16)
-    // [0x55f1278af96e]
-    auto parenStart = line.find("(");
-    auto parenEnd = line.find(")");
-    fileName = line.substr(0, parenStart);
-    // Convert filename to canonical path
-    char buf[PATH_MAX];
-    ::realpath(fileName.c_str(), buf);
-    fileName = std::string(buf);
-    functionName = line.substr(parenStart + 1, parenEnd - (parenStart + 1));
-    // Strip off the offset from the name
-    functionName = functionName.substr(0, functionName.find("+"));
-    if (addressMaps.find(fileName) != addressMaps.end()) {
-      // Make address relative to process start
-      addr = addressToString(uint64_t(stack[a]) - addressMaps[fileName].first);
-    } else {
-      addr = addressToString(uint64_t(stack[a]));
-    }
-#endif
-    // Perform demangling if parsed properly
-    if (!functionName.empty()) {
-      int status = 0;
-      auto demangledFunctionName =
-          abi::__cxa_demangle(functionName.data(), 0, 0, &status);
-      // if demangling is successful, output the demangled function name
-      if (status == 0) {
-        // Success (see
-        // http://gcc.gnu.org/onlinedocs/libstdc++/libstdc++-html-USERS-4.3/a01696.html)
-        functionName = std::string(demangledFunctionName);
+      // Example: ust-test                            0x000000010001e883
+      // _ZNK5Catch21TestInvokerAsFunction6invokeEv + 19
+      auto p = line.find("0x");
+      if (p != std::string::npos) {
+        addr = line.substr(p);
+        auto spaceLoc = addr.find(" ");
+        functionName = addr.substr(spaceLoc + 1);
+        functionName = functionName.substr(0, functionName.find(" +"));
+        addr = addr.substr(0, spaceLoc);
       }
-      free(demangledFunctionName);
+#else
+      // Example: ./ust-test(_ZNK5Catch21TestInvokerAsFunction6invokeEv+0x16)
+      // [0x55f1278af96e]
+      auto parenStart = line.find("(");
+      auto parenEnd = line.find(")");
+      fileName = line.substr(0, parenStart);
+      // Convert filename to canonical path
+      char buf[PATH_MAX];
+      ::realpath(fileName.c_str(), buf);
+      fileName = std::string(buf);
+      functionName = line.substr(parenStart + 1, parenEnd - (parenStart + 1));
+      // Strip off the offset from the name
+      functionName = functionName.substr(0, functionName.find("+"));
+      if (addressMaps.find(fileName) != addressMaps.end()) {
+        // Make address relative to process start
+        addr =
+            addressToString(uint64_t(stack[a]) - addressMaps[fileName].first);
+      } else {
+        addr = addressToString(uint64_t(stack[a]));
+      }
+#endif
+      // Perform demangling if parsed properly
+      if (!functionName.empty()) {
+        int status = 0;
+        auto demangledFunctionName =
+            abi::__cxa_demangle(functionName.data(), 0, 0, &status);
+        // if demangling is successful, output the demangled function name
+        if (status == 0) {
+          // Success (see
+          // http://gcc.gnu.org/onlinedocs/libstdc++/libstdc++-html-USERS-4.3/a01696.html)
+          functionName = std::string(demangledFunctionName);
+        }
+        if (demangledFunctionName) {
+          free(demangledFunctionName);
+        }
+      }
+      StackTraceEntry entry(a, addr, fileName, functionName, "", -1);
+      stackTrace.push_back(entry);
     }
-    StackTraceEntry entry(a, addr, fileName, functionName, "", -1);
-    stackTrace.push_back(entry);
+    free(strings);
   }
-  free(strings);
 #endif
 
 // Fetch source file & line numbers
