@@ -336,14 +336,14 @@ inline StackTrace generate() {
 
   for (int a = 0; unw_step(&cursor) > 0; a++) {
     unw_get_reg(&cursor, UNW_REG_IP, &ip);
-    static const size_t kMax = 256;
-    char mangled[kMax], demangled[kMax];
+    static const size_t kMax = 16 * 1024;
+    char mangled[kMax];
     unw_word_t offset;
     unw_get_proc_name(&cursor, mangled, kMax, &offset);
 
     int ok;
     size_t len = kMax;
-    abi::__cxa_demangle(mangled, demangled, &len, &ok);
+    char *demangled = abi::__cxa_demangle(mangled, 0, 0, &ok);
 
     std::string filename;
     uint64_t absoluteAddress = uint64_t(ip);
@@ -362,6 +362,9 @@ inline StackTrace generate() {
                         : addressToString(absoluteAddress),
         filename, ok == 0 ? std::string(demangled) : std::string(mangled), "",
         -1);
+    if (demangled) {
+      free(demangled);
+    }
     stackTrace.push_back(entry);
   }
 #else
