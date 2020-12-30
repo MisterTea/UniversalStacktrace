@@ -1,6 +1,9 @@
 cmake_minimum_required (VERSION 3.0.2)
 project (UniversalStackTrace VERSION 0.0.1)
 
+SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/external/sanitizers-cmake/cmake" ${CMAKE_MODULE_PATH})
+FIND_PACKAGE(Sanitizers)
+
 # Enable C++-17
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -std=c++17")
 

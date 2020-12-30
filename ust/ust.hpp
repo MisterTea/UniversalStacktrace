@@ -432,14 +432,14 @@ inline StackTrace generate() {
 #ifdef __APPLE__
   std::ostringstream ss;
   ss << "atos -p " << std::to_string(getpid()) << " ";
-  for (int a = 0; a < numFrames; a++) {
-    ss << "0x" << std::hex << uint64_t(stack[a]) << " ";
+  for (int a = 0; a < (int)stackTrace.size(); a++) {
+    ss << stackTrace[a].address << " ";
   }
   auto atosOutput = SystemToStr(ss.str().c_str());
   if (atosOutput.length()) {
     auto atosLines = split(atosOutput, '\n');
     std::regex fileLineRegex("\\(([^\\(]+):([0-9]+)\\)$");
-    for (int a = 0; a < numFrames; a++) {
+    for (int a = 0; a < (int)stackTrace.size(); a++) {
       // Find the filename and line number
       std::smatch matches;
       if (regex_search(atosLines[a], matches, fileLineRegex)) {
