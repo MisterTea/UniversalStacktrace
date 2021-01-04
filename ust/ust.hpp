@@ -45,6 +45,7 @@
 #include <iostream>
 #include <list>
 #include <map>
+#include <mutex>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -272,6 +273,10 @@ inline StackTrace generate() {
 // Linux uses backtrace() + addr2line
 // MinGW uses CaptureStackBackTrace() + addr2line
 inline StackTrace generate() {
+  // Libunwind and some other functions aren't thread safe.
+  static std::mutex mtx;
+  std::unique_lock<std::mutex> lock(mtx);
+
   std::vector<StackTraceEntry> stackTrace;
   std::map<std::string, std::pair<uint64_t, uint64_t> > addressMaps;
   std::string line;
