@@ -14,9 +14,6 @@ SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -ggdb3")
 IF(APPLE)
 # Turn off address randomizing to get debug prints
 SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-pie")
-ELSEIF(UNIX)
-# Enable dynamic relocation
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -rdynamic")
 ENDIF()
 
 include_directories(

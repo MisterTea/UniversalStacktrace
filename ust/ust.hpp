@@ -444,7 +444,7 @@ inline StackTrace generate() {
   auto atosOutput = SystemToStr(ss.str().c_str());
   if (atosOutput.length()) {
     auto atosLines = split(atosOutput, '\n');
-    std::regex fileLineRegex("\\(([^\\(]+):([0-9]+)\\)$");
+    std::regex fileLineRegex("\\(([^\\(]+):([0-9]+)\\)");
     for (int a = 0; a < (int)stackTrace.size(); a++) {
       // Find the filename and line number
       std::smatch matches;
@@ -480,7 +480,7 @@ inline StackTrace generate() {
           std::list<std::string>(outputLines.begin(), outputLines.end());
     }
   }
-  std::regex addrToLineRegex("^(.+?) at (.+):([0-9]+)$");
+  std::regex addrToLineRegex("^(.+?) at (.+):([0-9]+)");
   for (auto &it : stackTrace) {
     if (it.binaryFileName.length() &&
         fileData.find(it.binaryFileName) != fileData.end()) {
