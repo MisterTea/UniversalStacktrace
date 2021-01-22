@@ -275,7 +275,7 @@ inline StackTrace generate() {
 inline StackTrace generate() {
   // Libunwind and some other functions aren't thread safe.
   static std::mutex mtx;
-  std::unique_lock<std::mutex> lock(mtx);
+  std::lock_guard<std::mutex> lock(mtx);
 
   std::vector<StackTraceEntry> stackTrace;
   std::map<std::string, std::pair<uint64_t, uint64_t> > addressMaps;
