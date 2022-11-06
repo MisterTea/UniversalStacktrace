@@ -1,6 +1,8 @@
 cmake_minimum_required (VERSION 3.0.2)
 project (UniversalStackTrace VERSION 0.0.1)
 
+LIST(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+
 SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/external/sanitizers-cmake/cmake" ${CMAKE_MODULE_PATH})
 FIND_PACKAGE(Sanitizers)
 
@@ -41,11 +43,14 @@ SET(
   System
 )
 ELSE()
-SET(
-  CORE_LIBRARIES
+find_package(Libunwind)
+if(LIBUNWIND_FOUND)
+  SET(
+    CORE_LIBRARIES
 
-  unwind
-)
+	LIBUNWIND_LIBRARIES
+  )
+  ENDIF()
 ENDIF()
 
 add_executable(
