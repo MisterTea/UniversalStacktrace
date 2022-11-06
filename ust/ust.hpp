@@ -347,7 +347,6 @@ inline StackTrace generate() {
     unw_get_proc_name(&cursor, mangled, kMax, &offset);
 
     int ok;
-    size_t len = kMax;
     char *demangled = abi::__cxa_demangle(mangled, 0, 0, &ok);
 
     std::string filename;
@@ -404,8 +403,9 @@ inline StackTrace generate() {
       fileName = line.substr(0, parenStart);
       // Convert filename to canonical path
       char buf[PATH_MAX];
-      ::realpath(fileName.c_str(), buf);
-      fileName = std::string(buf);
+      char* res = ::realpath(fileName.c_str(), buf);
+      if(res) // if realpath failed, use filename
+        fileName = std::string(buf);
       functionName = line.substr(parenStart + 1, parenEnd - (parenStart + 1));
       // Strip off the offset from the name
       functionName = functionName.substr(0, functionName.find("+"));
