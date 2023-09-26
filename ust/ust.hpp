@@ -1,8 +1,9 @@
 #pragma once
 
 #ifdef _WIN32
-#include <DbgHelp.h>
 #include <windows.h>
+//
+#include <DbgHelp.h>
 #else
 #include <cxxabi.h>
 #include <errno.h>
@@ -403,8 +404,8 @@ inline StackTrace generate() {
       fileName = line.substr(0, parenStart);
       // Convert filename to canonical path
       char buf[PATH_MAX];
-      char* res = ::realpath(fileName.c_str(), buf);
-      if(res) // if realpath failed, use filename
+      char *res = ::realpath(fileName.c_str(), buf);
+      if (res)  // if realpath failed, use filename
         fileName = std::string(buf);
       functionName = line.substr(parenStart + 1, parenEnd - (parenStart + 1));
       // Strip off the offset from the name

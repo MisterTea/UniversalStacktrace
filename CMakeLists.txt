@@ -10,8 +10,8 @@ FIND_PACKAGE(Sanitizers)
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -std=c++17")
 
 # Enable debug info
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -ggdb3")
-SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -ggdb3")
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -ggdb3 -no-pie")
+SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -ggdb3 -no-pie")
 
 IF(APPLE)
 # Turn off address randomizing to get debug prints
