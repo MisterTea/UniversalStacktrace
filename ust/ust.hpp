@@ -4,6 +4,7 @@
 #include <windows.h>
 //
 #include <DbgHelp.h>
+#define USE_UNWIND (0)
 #else
 #include <cxxabi.h>
 #include <errno.h>
