@@ -9,12 +9,11 @@
 #include <cxxabi.h>
 #include <errno.h>
 
-#if __has_include(<libunwind.h>)
-#define USE_UNWIND (1)
+#if defined(USE_UNWIND) && USE_UNWIND
 #define UNW_LOCAL_ONLY
 #include <libunwind.h>
 #elif __has_include(<execinfo.h>)
-#define USE_UNWIND (0)
+#define USE_UNWIND 0
 #include <execinfo.h>
 #else
 #error Please install libunwind
