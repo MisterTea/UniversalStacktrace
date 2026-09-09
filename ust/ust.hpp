@@ -372,6 +372,9 @@ inline StackTrace generate() {
     }
     stackTrace.push_back(entry);
   }
+#elif defined(__ANDROID__)
+  // Android's bionic libc does not provide execinfo backtrace functions.
+  // Keep fatal logging usable without attempting to collect native frames.
 #else
   numFrames = backtrace(stack, MAX_STACK_FRAMES);
   memmove(stack, stack + 1, sizeof(void *) * (numFrames - 1));
