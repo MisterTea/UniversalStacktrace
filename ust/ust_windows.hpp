@@ -192,8 +192,23 @@ UST_NOINLINE inline StackTrace generate_raw() {
 }
 
 UST_NOINLINE inline StackTrace generate() {
+#if defined(__MINGW32__) && !defined(_GLIBCXX_HAS_GTHREADS)
+  // MinGW win32 thread model has no std::mutex / std::call_once - use CRITICAL_SECTION
+  static CRITICAL_SECTION cs;
+  static bool cs_init = false;
+  if (!cs_init) {
+    InitializeCriticalSection(&cs);
+    cs_init = true;
+  }
+  struct CsGuard {
+    CRITICAL_SECTION* c;
+    CsGuard(CRITICAL_SECTION* cs_) : c(cs_) { EnterCriticalSection(c); }
+    ~CsGuard() { LeaveCriticalSection(c); }
+  } guard(&cs);
+#else
   static std::mutex mtx;
   std::lock_guard<std::mutex> lock(mtx);
+#endif
 
   std::vector<StackTraceEntry> stackTrace;
   void* stack[MAX_STACK_FRAMES];
