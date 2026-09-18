@@ -42,12 +42,12 @@ include_directories(
   ust
   )
 
-IF(MINGW)
-SET(
-  CORE_LIBRARIES
+IF(MINGW OR (CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND CMAKE_CXX_COMPILER MATCHES "x86_64-w64-mingw32"))
+ SET(
+   CORE_LIBRARIES
 
-  dbghelp
-)
+   dbghelp
+ )
 ELSEIF(WIN32)
 SET(
   CORE_LIBRARIES
