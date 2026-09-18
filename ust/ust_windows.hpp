@@ -9,8 +9,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include <DbgHelp.h>
 #ifdef _MSC_VER
+#include <DbgHelp.h>
 #include <shlwapi.h>
 #pragma comment(lib, "dbghelp.lib")
 #pragma comment(lib, "shlwapi.lib")
@@ -18,9 +18,15 @@
 // MSVC: /Zi is required; CMake should enable it for RelWithDebInfo.
 // No additional flags can be set from header, but pragma ensures linking.
 #else
+// MinGW (Windows GCC/Clang) does not ship the Windows SDK's DbgHelp; use
+// CaptureStackBackTrace + addr2line symbolication instead.
 #include <array>
 #include <cstdio>
 #include <libgen.h>
+#include <sys/stat.h>
+#if !defined(_MSC_VER) && (defined(__MINGW32__) || defined(__MINGW64__))
+#include <psapi.h>
+#endif
 #if defined(__MINGW32__) || defined(__MINGW64__)
 #define WEXITSTATUS(w) (((w) >> 8) & 0xff)
 #else
@@ -167,6 +173,36 @@ inline std::string SystemToStr(const char* cmd) {
   return result;
 }
 
+// PE debug information records addresses relative to the image's preferred
+// link-time base, while CaptureStackBackTrace returns addresses relative to
+// the image's (possibly ASLR-relocated) load base.  Translate between the two
+// before invoking GNU addr2line.
+inline uint64_t addr2lineAddress(void* address, HMODULE moduleHandle,
+                                 const std::string& fileName) {
+  if (!address || !moduleHandle) return uint64_t(address);
+
+  // The Windows loader rewrites OptionalHeader.ImageBase in the in-memory PE
+  // header after applying ASLR, so read the preferred base from the file.
+  IMAGE_DOS_HEADER dosHeader{};
+  IMAGE_NT_HEADERS ntHeaders{};
+  std::ifstream image(fileName, std::ios::binary);
+  image.read(reinterpret_cast<char*>(&dosHeader), sizeof(dosHeader));
+  if (!image || dosHeader.e_magic != IMAGE_DOS_SIGNATURE) {
+    return uint64_t(address);
+  }
+  image.seekg(dosHeader.e_lfanew);
+  image.read(reinterpret_cast<char*>(&ntHeaders), sizeof(ntHeaders));
+  if (!image || ntHeaders.Signature != IMAGE_NT_SIGNATURE) {
+    return uint64_t(address);
+  }
+
+  const uint64_t loadedBase = reinterpret_cast<uint64_t>(moduleHandle);
+  const uint64_t absoluteAddress = reinterpret_cast<uint64_t>(address);
+  if (absoluteAddress < loadedBase) return absoluteAddress;
+  return uint64_t(ntHeaders.OptionalHeader.ImageBase) +
+         (absoluteAddress - loadedBase);
+}
+
 UST_NOINLINE inline StackTrace generate_raw() {
   std::vector<StackTraceEntry> stackTrace;
   void* stack[MAX_STACK_FRAMES];
@@ -234,12 +270,26 @@ UST_NOINLINE inline StackTrace generate() {
   // Fetch source file & line numbers via addr2line (same as Unix)
   std::map<std::string, std::list<std::string>> fileAddresses;
   std::map<std::string, std::list<std::string>> fileData;
-  for (const auto& it : stackTrace) {
-    if (it.binaryFileName.length()) {
-      if (fileAddresses.find(it.binaryFileName) == fileAddresses.end()) {
-        fileAddresses[it.binaryFileName] = {};
+  for (int a = 0; a < numFrames; a++) {
+    HMODULE moduleHandle;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                       (const char*)stack[a], &moduleHandle);
+    std::string fileName(4096, '\0');
+    auto fileNameSize =
+        GetModuleFileNameA(moduleHandle, &fileName[0], fileName.size());
+    if (fileNameSize == 0 || fileNameSize == (ssize_t)fileName.size()) {
+      fileName = "";
+    } else {
+      fileName = fileName.substr(0, fileNameSize);
+      std::replace(fileName.begin(), fileName.end(), '\\', '/');
+    }
+    std::string addrStr =
+        addressToString(addr2lineAddress(stack[a], moduleHandle, fileName));
+    if (fileName.length()) {
+      if (fileAddresses.find(fileName) == fileAddresses.end()) {
+        fileAddresses[fileName] = {};
       }
-      fileAddresses.at(it.binaryFileName).push_back(it.address);
+      fileAddresses.at(fileName).push_back(addrStr);
     }
   }
   for (const auto& it : fileAddresses) {
