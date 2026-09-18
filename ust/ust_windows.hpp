@@ -259,7 +259,6 @@ UST_NOINLINE inline StackTrace generate() {
     if (!fileName.empty() && moduleHandle) {
       MODULEINFO moduleInfo;
       memset(&moduleInfo, 0, sizeof(moduleInfo));
-      moduleInfo.SizeOfStruct = sizeof(moduleInfo);
       if (GetModuleInformation(GetCurrentProcess(), moduleHandle,
                                  &moduleInfo, sizeof(moduleInfo))) {
         uint64_t moduleBase = (uint64_t)moduleInfo.lpBaseOfDll;
