@@ -9,8 +9,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include <DbgHelp.h>
 #ifdef _MSC_VER
+#include <DbgHelp.h>
 #include <shlwapi.h>
 #pragma comment(lib, "dbghelp.lib")
 #pragma comment(lib, "shlwapi.lib")
@@ -18,9 +18,12 @@
 // MSVC: /Zi is required; CMake should enable it for RelWithDebInfo.
 // No additional flags can be set from header, but pragma ensures linking.
 #else
+// MinGW (Windows GCC/Clang) does not ship the Windows SDK's DbgHelp; use
+// CaptureStackBackTrace + addr2line symbolication instead.
 #include <array>
 #include <cstdio>
 #include <libgen.h>
+#include <sys/stat.h>
 #if defined(__MINGW32__) || defined(__MINGW64__)
 #define WEXITSTATUS(w) (((w) >> 8) & 0xff)
 #else
