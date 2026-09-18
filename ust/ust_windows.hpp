@@ -276,6 +276,7 @@ UST_NOINLINE inline StackTrace generate() {
     }
   }
   for (const auto& it : fileAddresses) {
+    std::string fileName = it.first;
     std::ostringstream ss;
     ss << "addr2line -C -f -p -e " << fileName << " ";
     for (const auto& it2 : it.second) {
