@@ -24,6 +24,20 @@
 #include <cstdio>
 #include <libgen.h>
 #include <sys/stat.h>
+// Declare MODULEINFO and GetModuleInformation for MinGW (from Psapi.h)
+#ifndef MODULEINFO_DEFINED
+#define MODULEINFO_DEFINED
+typedef struct _MODULEINFO {
+  LPVOID lpBaseOfDll;
+  DWORD SizeOfImage;
+  LPVOID EntryPoint;
+} MODULEINFO, *LPMODULEINFO;
+#endif
+#ifndef UST_MODULEINFO_PROTOTYPE
+#define UST_MODULEINFO_PROTOTYPE
+BOOL WINAPI GetModuleInformation(HANDLE hProcess, HMODULE hModule,
+                                  LPMODULEINFO lpmodinfo, DWORD cb);
+#endif
 #if defined(__MINGW32__) || defined(__MINGW64__)
 #define WEXITSTATUS(w) (((w) >> 8) & 0xff)
 #else
