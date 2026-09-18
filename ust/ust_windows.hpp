@@ -237,16 +237,45 @@ UST_NOINLINE inline StackTrace generate() {
   // Fetch source file & line numbers via addr2line (same as Unix)
   std::map<std::string, std::list<std::string>> fileAddresses;
   std::map<std::string, std::list<std::string>> fileData;
-  for (const auto& it : stackTrace) {
-    if (it.binaryFileName.length()) {
-      if (fileAddresses.find(it.binaryFileName) == fileAddresses.end()) {
-        fileAddresses[it.binaryFileName] = {};
+  for (int a = 0; a < numFrames; a++) {
+    HMODULE moduleHandle;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                       (const char*)stack[a], &moduleHandle);
+    std::string fileName(4096, '\0');
+    auto fileNameSize =
+        GetModuleFileNameA(moduleHandle, &fileName[0], fileName.size());
+    if (fileNameSize == 0 || fileNameSize == (ssize_t)fileName.size()) {
+      fileName = "";
+    } else {
+      fileName = fileName.substr(0, fileNameSize);
+      std::replace(fileName.begin(), fileName.end(), '\\', '/');
+    }
+    // Compute relative address for addr2line (needs module-relative offset)
+    uint64_t absoluteAddr = uint64_t(stack[a]);
+    uint64_t relativeAddr = absoluteAddr;
+    if (!fileName.empty() && moduleHandle) {
+      MODULEINFO moduleInfo;
+      memset(&moduleInfo, 0, sizeof(moduleInfo));
+      moduleInfo.SizeOfStruct = sizeof(moduleInfo);
+      if (GetModuleInformation(GetCurrentProcess(), moduleHandle,
+                                 &moduleInfo, sizeof(moduleInfo))) {
+        uint64_t moduleBase = (uint64_t)moduleInfo.lpBaseOfDll;
+        if (absoluteAddr >= moduleBase) {
+          relativeAddr = absoluteAddr - moduleBase;
+        }
       }
-      fileAddresses.at(it.binaryFileName).push_back(it.address);
+    }
+    std::string addrStr = addressToString(relativeAddr);
+    // Update the stackTrace entry with relative address for addr2line lookup
+    stackTrace[a].address = addrStr;
+    if (fileName.length()) {
+      if (fileAddresses.find(fileName) == fileAddresses.end()) {
+        fileAddresses[fileName] = {};
+      }
+      fileAddresses.at(fileName).push_back(addrStr);
     }
   }
   for (const auto& it : fileAddresses) {
-    std::string fileName = it.first;
     std::ostringstream ss;
     ss << "addr2line -C -f -p -e " << fileName << " ";
     for (const auto& it2 : it.second) {
